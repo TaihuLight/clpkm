@@ -5,9 +5,6 @@ CXXFLAGS = -Wall -Wextra -pedantic -fstack-protector-strong -std=c++14 \
            # -O2 -ftree-vectorize -flto
 LDFLAGS  = -Wl,-O1,--sort-common,--as-needed,-z,relro,-z,now # -s
 LIBS     = 
-TARGET   = clpkmcc
-SRCS     = $(wildcard *.cpp)
-OBJS     = ${SRCS:%.cpp=%.o}
 
 CXXFLAGS += $(shell $(LLVM_CONFIG) --cxxflags)
 LDFLAGS  += $(shell $(LLVM_CONFIG) --ldflags)
@@ -18,15 +15,17 @@ LIBS     += -Wl,--start-group $(shell $(LLVM_CONFIG) --libs) \
             -lclangSerialization -lclangToolingCore -lclangTooling \
             -lclangFormat -lclangRewrite -lclangASTMatchers -Wl,--end-group
 
-all: $(TARGET)
+all: clpkmpp clpkmcc
 
-$(TARGET): $(OBJS)
-	$(CXX) $(CXXFLAGS) $(LDFLAGS) $^ -fPIE -pie -o $@ $(LIBS)
+clpkmpp:
+	$(MAKE) -C pp TARGET=$@
+	cp pp/$@ .
 
-%.o: %.cpp
-	$(CXX) $(CXXFLAGS) -fPIE $< -c -o $@
+clpkmcc:
+	$(MAKE) -C cc TARGET=$@
+	cp cc/$@ .
 
 .PHONY: clean
 
 clean:
-	$(RM) $(TARGET) *.o
+	$(RM) clpkmpp clpkmcc pp/*.o pp/clpkmpp cc/*.o cc/clpkmcc
