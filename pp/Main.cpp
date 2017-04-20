@@ -151,8 +151,6 @@ public:
 
 			}
 
-		CST.clear();
-
 		}
 
 private:
