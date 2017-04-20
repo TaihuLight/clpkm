@@ -3,16 +3,16 @@
 //
 // Modified from Eli's tooling example
 //===----------------------------------------------------------------------===//
+#include <algorithm>
 #include <deque>
-#include <sstream>
 #include <string>
 #include <unordered_map>
-#include <unordered_set>
 #include <utility>
 
 #include "clang/AST/AST.h"
 #include "clang/AST/ASTConsumer.h"
 #include "clang/AST/RecursiveASTVisitor.h"
+#include "clang/Basic/Diagnostic.h"
 #include "clang/Frontend/ASTConsumers.h"
 #include "clang/Frontend/CompilerInstance.h"
 #include "clang/Frontend/FrontendActions.h"
@@ -113,6 +113,9 @@ public:
 
 	void EndSourceFileAction() override {
 
+		if (getCompilerInstance().getDiagnostics().hasErrorOccurred())
+			return;
+
 		SourceManager &SM = PPRewriter.getSourceMgr();
 		PPRewriter.getEditBuffer(SM.getMainFileID()).write(llvm::outs());
 
@@ -137,13 +140,14 @@ public:
 
 		ASTFrontendAction::ExecuteAction();
 		Nonce = 0;
+		std::vector<FunctionDecl*> CallChain;
 
 		while (!CST.empty()) {
 
-			auto It = CST.begin();
-			std::unordered_set<FunctionDecl*> CallChain;
+			if (!PerformInline(CST.begin()->first, CallChain))
+				return;
 
-			PerformInline(It->first, CallChain);
+			CallChain.clear();
 
 			}
 
@@ -159,7 +163,7 @@ private:
 	size_t        Nonce;
 
 	// Generate code snippet for inlining
-	bool GenCodeSnippet(FunctionDecl* FuncDecl, std::unordered_set<FunctionDecl*>& CallChain) {
+	bool GenCodeSnippet(FunctionDecl* FuncDecl, std::vector<FunctionDecl*>& CallChain) {
 
 		// Already generated code snippet
 		if (CC.find(FuncDecl) != CC.end())
@@ -204,7 +208,7 @@ private:
 
 		}
 
-	bool PerformInline(FunctionDecl* FuncDecl, std::unordered_set<FunctionDecl*>& CallChain) {
+	bool PerformInline(FunctionDecl* FuncDecl, std::vector<FunctionDecl*>& CallChain) {
 
 		if (!FuncDecl->hasBody()) {
 
@@ -215,12 +219,28 @@ private:
 
 			}
 
-		if (CallChain.find(FuncDecl) != CallChain.end()) {
+		if (auto It = std::find(CallChain.begin(), CallChain.end(), FuncDecl);
+		    It != CallChain.end()) {
 
-			// TODO
 			auto& Diag = getCompilerInstance().getDiagnostics();
+			auto ErrDiagID = Diag.getCustomDiagID(DiagnosticsEngine::Level::Error, "%0");
+			auto NoteDiagID = Diag.getCustomDiagID(DiagnosticsEngine::Level::Note, "call chain: %0 -> %1%0");
 
-			llvm::errs() << "Recursion detected.\n";
+			std::string FuncName = FuncDecl->getNameInfo().getName().getAsString();
+			std::string Chain;
+
+			Diag.Report(FuncDecl->getNameInfo().getLoc(), ErrDiagID) << "recursion detected";
+
+			for (auto CalledFunc = CallChain.rbegin();
+			     *CalledFunc != FuncDecl; ++CalledFunc) {
+
+				Chain = (*CalledFunc)->getNameInfo().getName().getAsString() +
+				        " -> " + std::move(Chain);
+
+				}
+
+			Diag.Report(NoteDiagID) << FuncName << Chain;
+
 			return false;
 
 			}
@@ -231,8 +251,7 @@ private:
 		if (CallSiteRecord == CST.end())
 			return true;
 
-		auto CallChainIt = CallChain.emplace(FuncDecl);
-		assert(CallChainIt.second && "Failed to emplace to CallChain");
+		CallChain.emplace_back(FuncDecl);
 
 		// Clang traverse the AST in a DFS manner
 		// Subexpressions appear after the main expression, and they should
@@ -317,7 +336,7 @@ private:
 
 		// Remove the record so we won't inline twice
 		CST.erase(CallSiteRecord);
-		CallChain.erase(CallChainIt.first);
+		CallChain.pop_back();
 
 		return true;
 
