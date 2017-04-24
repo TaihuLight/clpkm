@@ -1,88 +1,82 @@
-//------------------------------------------------------------------------------
+//===----------------------------------------------------------------------===//
 // CLPKMCC
 //
 // Modified from Eli's tooling example
-//------------------------------------------------------------------------------
-#include <sstream>
+//===----------------------------------------------------------------------===//
 #include <string>
-#include <vector>
+#include <utility>
 
+#include "clang/Analysis/CFG.h"
 #include "clang/AST/AST.h"
 #include "clang/AST/ASTConsumer.h"
 #include "clang/AST/RecursiveASTVisitor.h"
-#include "clang/Analysis/CFG.h"
-#include "clang/Analysis/CallGraph.h"
+#include "clang/Basic/Diagnostic.h"
 #include "clang/Frontend/ASTConsumers.h"
 #include "clang/Frontend/CompilerInstance.h"
 #include "clang/Frontend/FrontendActions.h"
 #include "clang/Rewrite/Core/Rewriter.h"
 #include "clang/Tooling/CommonOptionsParser.h"
 #include "clang/Tooling/Tooling.h"
+#include "llvm/Support/CommandLine.h"
+#include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
+
+#define DEBUG_TYPE "clpkmcc"
 
 using namespace clang;
 using namespace clang::driver;
 using namespace clang::tooling;
 
-static llvm::cl::OptionCategory CLPKMCategory("CLPKM");
+static llvm::cl::OptionCategory CLPKMCCCategory("CLPKMCC");
 
-// By implementing RecursiveASTVisitor, we can specify which AST nodes
-// we're interested in by overriding relevant methods.
-class MyASTVisitor : public RecursiveASTVisitor<MyASTVisitor> {
+
+
+class Extractor : public RecursiveASTVisitor<Extractor> {
 public:
-	MyASTVisitor(Rewriter& R) : TheRewriter(R) {
-
+	Extractor(Rewriter& R, DiagnosticsEngine& DE) :
+		TheRewriter(R), TheDiag(DE) {
+		;
 		}
 
-	bool VisitStmt(Stmt* s) {
-
-		// Only care about If statements.
-		if (isa<IfStmt>(s)) {
-
-			IfStmt* IfStatement = cast<IfStmt>(s);
-			Stmt*   Then = IfStatement->getThen();
-			Stmt*   Else = IfStatement->getElse();
-
-			}
-
-		return true;
-
-		}
-
-	bool VisitFunctionDecl(FunctionDecl *FuncDecl) {
+	// 1.   Patch arguments
+	// 2.   Re-arrange BBs
+	// 3.   Insert Checkpoint/Resume codes
+	bool TraverseFunctionDecl(FunctionDecl* FuncDecl) {
 
 		if (FuncDecl == nullptr)
 			return false;
 
-		DeclarationName DeclName = FuncDecl->getNameInfo().getName();
-		std::string FuncName = DeclName.getAsString();
-
-		if (!FuncDecl->hasAttr<OpenCLKernelAttr>()) {
-
-			llvm::errs() << "Non-kernel function " << FuncName
-			             << " should be inlined first.\n";
-			return false;
-
-			}
-
-		size_t ParamSize = FuncDecl->param_size();
-		const char* CLPKMParam = ", __global char * __clpkm_hdr, "
-		                         "__global char * __clpkm_local, "
-		                         "__global char * __clpkm_lvb";
+		if (!FuncDecl->hasAttr<OpenCLKernelAttr>())
+			return true;
 
 		// FIXME: I can't figure out a graceful way to do this at the moment
 		//        It's uncommon anyway
-		if (ParamSize == 0)
-			llvm_unreachable("function w/ parameter is yet implemented.");
+		if (auto ParamSize = FuncDecl->param_size(); ParamSize <= 0) {
 
-		auto LastParam = FuncDecl->getParamDecl(ParamSize - 1);
-		auto InsertCut = LastParam->getSourceRange().getEnd();
+			auto DiagID = TheDiag.getCustomDiagID(DiagnosticsEngine::Level::Warning, "skipping nullary function");
+			TheDiag.Report(FuncDecl->getNameInfo().getLoc(), DiagID);
 
-		TheRewriter.InsertTextAfterToken(InsertCut, CLPKMParam);
+			return true;
+
+			}
+		// Append arguments
+		else {
+
+			auto LastParam = FuncDecl->getParamDecl(ParamSize - 1);
+			auto InsertCut = LastParam->getSourceRange().getEnd();
+			const char* CLPKMParam = ", __global char * __clpkm_hdr, "
+			                         "__global char * __clpkm_local, "
+			                         "__global char * __clpkm_lvb";
+
+			TheRewriter.InsertTextAfterToken(InsertCut, CLPKMParam);
+
+			}
 
 		if (!FuncDecl->hasBody())
 			return true;
 
+		// TODO
+		std::string FuncName = FuncDecl->getNameInfo().getName().getAsString();
 		CFG::BuildOptions Options;
 		auto CFG = CFG::buildCFG(FuncDecl, FuncDecl->getBody(),
 		                         &FuncDecl->getASTContext(), Options);
@@ -95,41 +89,32 @@ public:
 		}
 
 private:
-	Rewriter &TheRewriter;
+	Rewriter&          TheRewriter;
+	DiagnosticsEngine& TheDiag;
 
 	};
 
-// Implementation of the ASTConsumer interface for reading an AST produced
-// by the Clang parser.
-class MyASTConsumer : public ASTConsumer {
+
+
+class ExtractorDriver : public ASTConsumer {
 public:
-	MyASTConsumer(Rewriter &R) : Visitor(R) {
+	template <class ... P>
+	ExtractorDriver(P&& ... Param) :
+		Visitor(std::forward<P>(Param)...) {
 
 		}
 
 	bool HandleTopLevelDecl(DeclGroupRef DeclGroup) override {
 
-		for (auto& Decl : DeclGroup) {
-
-			if (!Decl->isInvalidDecl())
-				CallGraph.addToCallGraph(Decl);
-
-			}
-
-		CallGraphNode* VirtualRoot = CallGraph.getRoot();
-
-		llvm::errs() << "Dump virtual root\n";
-		VirtualRoot->print(llvm::errs());
-		llvm::errs() << '\n';
+		for (auto& Decl : DeclGroup)
+			Visitor.TraverseDecl(Decl);
 
 		return true;
 
 		}
 
-
 private:
-	CallGraph CallGraph;
-	MyASTVisitor Visitor;
+	Extractor Visitor;
 
 	};
 
@@ -141,16 +126,19 @@ public:
 
 	void EndSourceFileAction() override {
 
-		SourceManager &SM = TheRewriter.getSourceMgr();
-		TheRewriter.getEditBuffer(SM.getMainFileID()).write(llvm::outs());
+		if (getCompilerInstance().getDiagnostics().hasErrorOccurred())
+			return;
+
+		SourceManager &SM = CCRewriter.getSourceMgr();
+		CCRewriter.getEditBuffer(SM.getMainFileID()).write(llvm::outs());
 
 		}
 
 	std::unique_ptr<ASTConsumer> CreateASTConsumer(CompilerInstance &CI,
 	                                               StringRef file) override {
 
-		TheRewriter.setSourceMgr(CI.getSourceManager(), CI.getLangOpts());
-		return llvm::make_unique<MyASTConsumer>(TheRewriter);
+		CCRewriter.setSourceMgr(CI.getSourceManager(), CI.getLangOpts());
+		return llvm::make_unique<ExtractorDriver>(CCRewriter, getCompilerInstance().getDiagnostics());
 
 		}
 
@@ -162,7 +150,7 @@ public:
 		}
 
 private:
-	Rewriter TheRewriter;
+	Rewriter CCRewriter;
 
 	};
 
@@ -170,7 +158,7 @@ private:
 
 int main(int ArgCount, const char* ArgVar[]) {
 
-	CommonOptionsParser Options(ArgCount, ArgVar, CLPKMCategory);
+	CommonOptionsParser Options(ArgCount, ArgVar, CLPKMCCCategory);
 	ClangTool Tool(Options.getCompilations(), Options.getSourcePathList());
 
 	return Tool.run(newFrontendActionFactory<CLPKMCCFrontendAction>().get());
