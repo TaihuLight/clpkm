@@ -161,7 +161,7 @@ public:
 		}
 
 private:
-	Rewriter      PPRewriter;
+	Rewriter PPRewriter;
 
 	};
 

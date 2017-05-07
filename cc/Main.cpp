@@ -14,6 +14,7 @@
 #include "clang/Frontend/ASTConsumers.h"
 #include "clang/Frontend/CompilerInstance.h"
 #include "clang/Frontend/FrontendActions.h"
+#include "clang/Lex/Lexer.h"
 #include "clang/Rewrite/Core/Rewriter.h"
 #include "clang/Tooling/CommonOptionsParser.h"
 #include "clang/Tooling/Tooling.h"
@@ -33,17 +34,26 @@ static llvm::cl::OptionCategory CLPKMCCCategory("CLPKMCC");
 
 class Extractor : public RecursiveASTVisitor<Extractor> {
 public:
-	Extractor(Rewriter& R, DiagnosticsEngine& DE) :
-		TheRewriter(R), TheDiag(DE) {
+	Extractor(Rewriter& R, CompilerInstance& CI) :
+		TheRewriter(R), TheCI(CI) {
 		;
 		}
 
 	bool VisitSwitchStmt(SwitchStmt* SS) {
 
-		auto DiagID = TheDiag.getCustomDiagID(DiagnosticsEngine::Level::Error, "switch is not supported");
+		auto& TheDiag = TheCI.getDiagnostics();
+		auto  DiagID = TheDiag.getCustomDiagID(DiagnosticsEngine::Level::Error,
+		                                       "switch is not supported");
 		TheDiag.Report(SS->getLocStart(), DiagID);
 
 		return false;
+
+		}
+
+	bool VisitStmt(Stmt* S) {
+
+		CostCounter++;
+		return true;
 
 		}
 
@@ -56,6 +66,33 @@ public:
 		// TODO
 
 		return true;
+
+		}
+
+	bool TraverseForStmt(ForStmt* FS) {
+
+		size_t OldCost = CostCounter;
+		RecursiveASTVisitor<Extractor>::TraverseForStmt(FS);
+
+		return PatchLoopBody(OldCost, CostCounter, FS, FS->getBody());
+
+		}
+
+	bool TraverseDoStmt(DoStmt* DS) {
+
+		size_t OldCost = CostCounter;
+		RecursiveASTVisitor<Extractor>::TraverseDoStmt(DS);
+
+		return PatchLoopBody(OldCost, CostCounter, DS, DS->getBody());
+
+		}
+
+	bool TraverseWhileStmt(WhileStmt* WS) {
+
+		size_t OldCost = CostCounter;
+		RecursiveASTVisitor<Extractor>::TraverseWhileStmt(WS);
+
+		return PatchLoopBody(OldCost, CostCounter, WS, WS->getBody());
 
 		}
 
@@ -74,6 +111,7 @@ public:
 		//        It's uncommon anyway
 		if (auto ParamSize = FuncDecl->param_size(); ParamSize <= 0) {
 
+			auto& TheDiag = TheCI.getDiagnostics();
 			auto DiagID = TheDiag.getCustomDiagID(DiagnosticsEngine::Level::Warning, "skipping nullary function");
 			TheDiag.Report(FuncDecl->getNameInfo().getLoc(), DiagID);
 
@@ -86,9 +124,10 @@ public:
 
 			auto LastParam = FuncDecl->getParamDecl(ParamSize - 1);
 			auto InsertCut = LastParam->getSourceRange().getEnd();
-			const char* CLPKMParam = ", __global char * __clpkm_hdr, "
+			const char* CLPKMParam = ", __global int * __clpkm_hdr, "
 			                         "__global char * __clpkm_local, "
-			                         "__global char * __clpkm_prv";
+			                         "__global char * __clpkm_prv, "
+			                         "__const size_t __clpkm_tlv";
 
 			TheRewriter.InsertTextAfterToken(InsertCut, CLPKMParam);
 
@@ -97,18 +136,58 @@ public:
 		if (!FuncDecl->hasBody())
 			return true;
 
-		RecursiveASTVisitor<Extractor>::TraverseFunctionDecl(FuncDecl);
+		CostCounter = 0;
+		Nonce = 1;
 
-		// TODO
 		std::string FuncName = FuncDecl->getNameInfo().getName().getAsString();
 
-		return true;
+		TheRewriter.InsertTextAfterToken(
+			FuncDecl->getBody()->getLocStart(),
+			"\n  size_t __clpkm_id = get_global_linear_id();\n"
+			"  size_t __clpkm_ctr = 0;\n"
+			"  switch (__clpkm_hdr[__clpkm_id]) {\n"
+			"  default:  return;\n"
+			"  case 1: ;\n");
+
+		TheRewriter.InsertTextBefore(FuncDecl->getBody()->getLocEnd(),
+		                             "\n  }\n  __clpkm_hdr[__clpkm_id] = 0;\n");
+
+		return RecursiveASTVisitor<Extractor>::TraverseFunctionDecl(FuncDecl);
 
 		}
 
 private:
-	Rewriter&          TheRewriter;
-	DiagnosticsEngine& TheDiag;
+	Rewriter&         TheRewriter;
+	CompilerInstance& TheCI;
+
+	size_t CostCounter;
+	size_t Nonce;
+
+	bool PatchLoopBody(size_t OldCost, size_t NewCost, Stmt* Loop, Stmt* Body) {
+
+		CostCounter = OldCost;
+
+		std::string ThisNonce = std::to_string(++Nonce);
+		std::string InstCR = " __clpkm_ctr += " +
+		                     std::to_string(NewCost - OldCost) + "; case " +
+		                     ThisNonce + ": "
+		                     "if (__clpkm_ctr > __clpkm_tlv) {"
+		                     "  __clpkm_hdr[__clpkm_id] = " + ThisNonce +
+		                     "; /* C */ return; } "
+		                     "else if (__clpkm_ctr <= 0) { /* R */ } ";
+
+		if (isa<CompoundStmt>(Body))
+			TheRewriter.InsertTextBefore(Body->getLocEnd(), InstCR);
+		else {
+
+			TheRewriter.InsertTextBefore(Body->getLocStart(), " { ");
+			TheRewriter.InsertTextAfterToken(Body->getLocEnd(), InstCR += " } ");
+
+			}
+
+		return true;
+
+		}
 
 	};
 
@@ -156,7 +235,7 @@ public:
 	                                               StringRef file) override {
 
 		CCRewriter.setSourceMgr(CI.getSourceManager(), CI.getLangOpts());
-		return llvm::make_unique<ExtractorDriver>(CCRewriter, getCompilerInstance().getDiagnostics());
+		return llvm::make_unique<ExtractorDriver>(CCRewriter, CI);
 
 		}
 
