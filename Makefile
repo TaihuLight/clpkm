@@ -15,14 +15,14 @@ LIBS     += -Wl,--start-group $(shell $(LLVM_CONFIG) --libs) \
             -lclangSerialization -lclangToolingCore -lclangTooling \
             -lclangFormat -lclangRewrite -lclangASTMatchers -Wl,--end-group
 
-all: clpkmpp clpkmcc
+all: clpkmpp clinliner clpkmcc
 
 clpkmpp:
 	$(MAKE) -C pp TARGET=$@
 	cp pp/$@ .
 
-inliner:
-	$(MAKE) -c inliner TARGET=$@
+clinliner:
+	$(MAKE) -C inliner TARGET=$@
 	cp inliner/$@ .
 
 clpkmcc:
@@ -32,4 +32,5 @@ clpkmcc:
 .PHONY: clean
 
 clean:
-	$(RM) clpkmpp clpkmcc pp/*.o pp/clpkmpp cc/*.o cc/clpkmcc
+	$(RM) clpkmpp clpkmcc clinliner \
+	pp/*.o pp/clpkmpp cc/*.o cc/clpkmcc inliner/*.o inliner/clinliner
