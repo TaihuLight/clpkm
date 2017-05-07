@@ -10,7 +10,7 @@ LIBS     := -Wl,--start-group $(shell $(LLVM_CONFIG) --libs) \
             -lclangSerialization -lclangToolingCore -lclangTooling \
             -lclangFormat -lclangRewrite -lclangASTMatchers -Wl,--end-group
 
-TARGET   := clpkmpp
+TARGET   := inliner
 SRCS     := $(wildcard *.cpp)
 OBJS     := ${SRCS:%.cpp=%.o}
 

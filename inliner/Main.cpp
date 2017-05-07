@@ -23,13 +23,13 @@
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
 
-#define DEBUG_TYPE "clpkmpp"
+#define DEBUG_TYPE "inliner"
 
 using namespace clang;
 using namespace clang::driver;
 using namespace clang::tooling;
 
-static llvm::cl::OptionCategory CLPKMPPCategory("CLPKMPP");
+static llvm::cl::OptionCategory InlinerCategory("Inliner");
 
 
 
@@ -42,8 +42,19 @@ using CodeCache = std::unordered_map<FunctionDecl*, CodeSnippet>;
 
 class Extractor : public RecursiveASTVisitor<Extractor> {
 public:
-	Extractor(CallSiteTable& CST, RetStmtTable& RST) :
-		TheCST(CST), TheRST(RST), TheFunction(nullptr) {
+	Extractor(CallSiteTable& CST, RetStmtTable& RST, CompilerInstance& CI) :
+		TheCST(CST), TheRST(RST), TheCI(CI), TheFunction(nullptr) {
+
+		}
+
+	bool VisitGotoStmt(GotoStmt* GS) {
+
+		auto& TheDiag = TheCI.getDiagnostics();
+		auto  DID = TheDiag.getCustomDiagID(DiagnosticsEngine::Level::Error,
+		                                    "goto is not supported");
+		TheDiag.Report(GS->getLocStart(), DID);
+
+		return false;
 
 		}
 
@@ -74,8 +85,9 @@ public:
 		}
 
 private:
-	CallSiteTable& TheCST;
-	RetStmtTable&  TheRST;
+	CallSiteTable&    TheCST;
+	RetStmtTable&     TheRST;
+	CompilerInstance& TheCI;
 
 	FunctionDecl*  TheFunction;
 
@@ -107,25 +119,25 @@ private:
 
 
 
-class CLPKMPPFrontendAction : public ASTFrontendAction {
+class InlinerFrontendAction : public ASTFrontendAction {
 public:
-	CLPKMPPFrontendAction() = default;
+	InlinerFrontendAction() = default;
 
 	void EndSourceFileAction() override {
 
 		if (getCompilerInstance().getDiagnostics().hasErrorOccurred())
 			return;
 
-		SourceManager &SM = PPRewriter.getSourceMgr();
-		PPRewriter.getEditBuffer(SM.getMainFileID()).write(llvm::outs());
+		SourceManager &SM = InlinerRewriter.getSourceMgr();
+		InlinerRewriter.getEditBuffer(SM.getMainFileID()).write(llvm::outs());
 
 		}
 
 	std::unique_ptr<ASTConsumer> CreateASTConsumer(CompilerInstance &CI,
 	                                               StringRef file) override {
 
-		PPRewriter.setSourceMgr(CI.getSourceManager(), CI.getLangOpts());
-		return llvm::make_unique<ExtractorDriver>(CST, RST);
+		InlinerRewriter.setSourceMgr(CI.getSourceManager(), CI.getLangOpts());
+		return llvm::make_unique<ExtractorDriver>(CST, RST, CI);
 
 		}
 
@@ -154,7 +166,7 @@ public:
 		}
 
 private:
-	Rewriter      PPRewriter;
+	Rewriter      InlinerRewriter;
 	CallSiteTable CST;
 	RetStmtTable  RST;
 	CodeCache     CC;
@@ -178,7 +190,7 @@ private:
 
 			CodeSnippet Body;
 
-			Body.emplace_back(PPRewriter.getRewrittenText(FuncDecl->getBody()->getSourceRange()));
+			Body.emplace_back(InlinerRewriter.getRewrittenText(FuncDecl->getBody()->getSourceRange()));
 			CC.emplace(FuncDecl, std::move(Body));
 
 			return true;
@@ -193,13 +205,13 @@ private:
 			SourceLocation RSLocStart = RS->getLocStart();
 			SourceLocation RSLocEnd = RS->getLocEnd();
 
-			CS.emplace_back(PPRewriter.getRewrittenText({Front, RSLocStart.getLocWithOffset(-1)}));
-			CS.emplace_back(PPRewriter.getRewrittenText({RSLocStart.getLocWithOffset(6), RSLocEnd}));
+			CS.emplace_back(InlinerRewriter.getRewrittenText({Front, RSLocStart.getLocWithOffset(-1)}));
+			CS.emplace_back(InlinerRewriter.getRewrittenText({RSLocStart.getLocWithOffset(6), RSLocEnd}));
 			Front = RSLocEnd.getLocWithOffset(1);
 
 			}
 
-		CS.emplace_back(PPRewriter.getRewrittenText({Front, FuncDecl->getBody()->getLocEnd()}));
+		CS.emplace_back(InlinerRewriter.getRewrittenText({Front, FuncDecl->getBody()->getLocEnd()}));
 		CC.emplace(FuncDecl, std::move(CS));
 
 		return true;
@@ -304,9 +316,9 @@ private:
 			// Prepare the arguments for the call expression
 			while (ParamIt != Callee->param_end()) {
 
-				Replace = PPRewriter.getRewrittenText((*ParamIt)->getSourceRange()) +
+				Replace = InlinerRewriter.getRewrittenText((*ParamIt)->getSourceRange()) +
 				          " = " +
-				          PPRewriter.getRewrittenText((*ArgIt)->getSourceRange()) +
+				          InlinerRewriter.getRewrittenText((*ArgIt)->getSourceRange()) +
 				          ";" + std::move(Replace);
 
 				++ArgIt;
@@ -327,8 +339,8 @@ private:
 			Replace = "({ __label__ " + ExitLabel + "; " +
 			          std::move(Replace) + "})";
 
-			PPRewriter.ReplaceText(CE->getSourceRange(),
-			                       Replace);
+			InlinerRewriter.ReplaceText(CE->getSourceRange(),
+			                            Replace);
 
 			}
 
@@ -346,9 +358,9 @@ private:
 
 int main(int ArgCount, const char* ArgVar[]) {
 
-	CommonOptionsParser Options(ArgCount, ArgVar, CLPKMPPCategory);
+	CommonOptionsParser Options(ArgCount, ArgVar, InlinerCategory);
 	ClangTool Tool(Options.getCompilations(), Options.getSourcePathList());
 
-	return Tool.run(newFrontendActionFactory<CLPKMPPFrontendAction>().get());
+	return Tool.run(newFrontendActionFactory<InlinerFrontendAction>().get());
 
 	}
