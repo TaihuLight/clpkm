@@ -21,6 +21,10 @@ clpkmpp:
 	$(MAKE) -C pp TARGET=$@
 	cp pp/$@ .
 
+inliner:
+	$(MAKE) -c inliner TARGET=$@
+	cp inliner/$@ .
+
 clpkmcc:
 	$(MAKE) -C cc TARGET=$@
 	cp cc/$@ .

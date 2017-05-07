@@ -38,6 +38,27 @@ public:
 		;
 		}
 
+	bool VisitSwitchStmt(SwitchStmt* SS) {
+
+		auto DiagID = TheDiag.getCustomDiagID(DiagnosticsEngine::Level::Error, "switch is not supported");
+		TheDiag.Report(SS->getLocStart(), DiagID);
+
+		return false;
+
+		}
+
+	// Patch barrier
+	bool VisitCallExpr(CallExpr* CE) {
+
+		if (CE->getDirectCallee()->getNameInfo().getName().getAsString() != "barrier")
+			return true;
+
+		// TODO
+
+		return true;
+
+		}
+
 	// 1.   Patch arguments
 	// 2.   Re-arrange BBs
 	// 3.   Insert Checkpoint/Resume codes
@@ -56,6 +77,7 @@ public:
 			auto DiagID = TheDiag.getCustomDiagID(DiagnosticsEngine::Level::Warning, "skipping nullary function");
 			TheDiag.Report(FuncDecl->getNameInfo().getLoc(), DiagID);
 
+			// TODO: remove body of nullary function?
 			return true;
 
 			}
@@ -66,7 +88,7 @@ public:
 			auto InsertCut = LastParam->getSourceRange().getEnd();
 			const char* CLPKMParam = ", __global char * __clpkm_hdr, "
 			                         "__global char * __clpkm_local, "
-			                         "__global char * __clpkm_lvb";
+			                         "__global char * __clpkm_prv";
 
 			TheRewriter.InsertTextAfterToken(InsertCut, CLPKMParam);
 
@@ -75,14 +97,10 @@ public:
 		if (!FuncDecl->hasBody())
 			return true;
 
+		RecursiveASTVisitor<Extractor>::TraverseFunctionDecl(FuncDecl);
+
 		// TODO
 		std::string FuncName = FuncDecl->getNameInfo().getName().getAsString();
-		CFG::BuildOptions Options;
-		auto CFG = CFG::buildCFG(FuncDecl, FuncDecl->getBody(),
-		                         &FuncDecl->getASTContext(), Options);
-
-		llvm::errs() << "Dump CFG of funcion " << FuncName << '\n';
-		CFG->dump(TheRewriter.getLangOpts(), true);
 
 		return true;
 
