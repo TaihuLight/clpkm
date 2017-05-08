@@ -70,6 +70,9 @@ public:
 
 	bool VisitReturnStmt(ReturnStmt* RS) {
 
+		if (RS == nullptr)
+			return true;
+
 		assert(TheFunction != nullptr && "ReturnStmt outside of function?");
 		TheRST[TheFunction].emplace_back(RS);
 		return true;
@@ -77,6 +80,9 @@ public:
 		}
 
 	bool VisitCallExpr(CallExpr* CE) {
+
+		if (CE == nullptr)
+			return true;
 
 		assert(TheFunction != nullptr && "CallExpr outside of function?");
 		TheCST[TheFunction].emplace_back(CE);

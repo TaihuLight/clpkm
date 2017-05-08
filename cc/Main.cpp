@@ -60,7 +60,11 @@ public:
 	// Patch barrier
 	bool VisitCallExpr(CallExpr* CE) {
 
-		if (CE->getDirectCallee()->getNameInfo().getName().getAsString() != "barrier")
+		if (CE == nullptr || CE->getDirectCallee() == nullptr)
+			return true;
+
+		if (CE->getDirectCallee()->getNameInfo().getName().getAsString() !=
+		    "barrier")
 			return true;
 
 		// TODO
@@ -71,6 +75,9 @@ public:
 
 	bool TraverseForStmt(ForStmt* FS) {
 
+		if (FS == nullptr)
+			return true;
+
 		size_t OldCost = CostCounter;
 		RecursiveASTVisitor<Extractor>::TraverseForStmt(FS);
 
@@ -80,6 +87,9 @@ public:
 
 	bool TraverseDoStmt(DoStmt* DS) {
 
+		if (DS == nullptr)
+			return true;
+
 		size_t OldCost = CostCounter;
 		RecursiveASTVisitor<Extractor>::TraverseDoStmt(DS);
 
@@ -88,6 +98,9 @@ public:
 		}
 
 	bool TraverseWhileStmt(WhileStmt* WS) {
+
+		if (WS == nullptr)
+			return true;
 
 		size_t OldCost = CostCounter;
 		RecursiveASTVisitor<Extractor>::TraverseWhileStmt(WS);
@@ -102,7 +115,7 @@ public:
 	bool TraverseFunctionDecl(FunctionDecl* FuncDecl) {
 
 		if (FuncDecl == nullptr)
-			return false;
+			return true;
 
 		if (!FuncDecl->hasAttr<OpenCLKernelAttr>())
 			return true;

@@ -59,11 +59,17 @@ public:
 	// The semicolor is not a part of a Expr. Append brace for CC.
 	bool VisitIfStmt(IfStmt* IS) {
 
+		if (IS == nullptr)
+			return true;
+
 		return AppendBrace(IS->getThen()) && AppendBrace(IS->getElse());
 
 		}
 
 	bool VisitWhileStmt(WhileStmt* WS) {
+
+		if (WS == nullptr)
+			return true;
 
 		return AppendBrace(WS->getBody());
 
@@ -71,11 +77,17 @@ public:
 
 	bool VisitForStmt(ForStmt* FS) {
 
+		if (FS == nullptr)
+			return true;
+
 		return AppendBrace(FS->getBody());
 
 		}
 
 	bool VisitDoStmt(DoStmt* DS) {
+
+		if (DS == nullptr)
+			return true;
 
 		return AppendBrace(DS->getBody());
 
