@@ -10,6 +10,7 @@ __kernel void hello(__global char *string) {
   if (get_global_id(0) != 0)
     return;
   
+    do {} while (0);
 
     int cyka = 0;
   
