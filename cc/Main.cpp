@@ -81,7 +81,8 @@ public:
 		size_t OldCost = CostCounter;
 		RecursiveASTVisitor<Extractor>::TraverseForStmt(FS);
 
-		return PatchLoopBody(OldCost, CostCounter, FS, FS->getBody());
+		return PatchLoopBody(OldCost, CostCounter,
+		                     FS, FS->getCond(), FS->getBody());
 
 		}
 
@@ -93,7 +94,8 @@ public:
 		size_t OldCost = CostCounter;
 		RecursiveASTVisitor<Extractor>::TraverseDoStmt(DS);
 
-		return PatchLoopBody(OldCost, CostCounter, DS, DS->getBody());
+		return PatchLoopBody(OldCost, CostCounter,
+		                     DS, DS->getCond(), DS->getBody());
 
 		}
 
@@ -105,7 +107,8 @@ public:
 		size_t OldCost = CostCounter;
 		RecursiveASTVisitor<Extractor>::TraverseWhileStmt(WS);
 
-		return PatchLoopBody(OldCost, CostCounter, WS, WS->getBody());
+		return PatchLoopBody(OldCost, CostCounter,
+		                     WS, WS->getCond(), WS->getBody());
 
 		}
 
@@ -176,9 +179,29 @@ private:
 	size_t CostCounter;
 	size_t Nonce;
 
-	bool PatchLoopBody(size_t OldCost, size_t NewCost, Stmt* Loop, Stmt* Body) {
+	bool PatchLoopBody(size_t OldCost, size_t NewCost,
+	                   Stmt* Loop, Expr* Cond, Stmt* Body) {
 
 		CostCounter = OldCost;
+
+		// If this condition is compiler-time evaluable
+		// Note: Cond could be nullptr in the case like:
+		//     for (;;) ...
+		if (bool Result;
+		    Cond != nullptr && Cond->isEvaluatable(TheCI.getASTContext()) &&
+		    Cond->EvaluateAsBooleanCondition(Result, TheCI.getASTContext())) {
+
+			// This loop will never repeat
+			if (!Result)
+				return true;
+
+			auto& TheDiag = TheCI.getDiagnostics();
+			auto  DiagID = TheDiag.getCustomDiagID(
+					DiagnosticsEngine::Level::Warning,
+					"infinite loop");
+			TheDiag.Report(Cond->getLocStart(), DiagID);
+
+			}
 
 		std::string ThisNonce = std::to_string(++Nonce);
 		std::string InstCR = " __clpkm_ctr += " +
