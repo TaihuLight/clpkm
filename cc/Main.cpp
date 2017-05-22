@@ -57,6 +57,19 @@ public:
 
 		}
 
+	bool VisitReturnStmt(ReturnStmt* RS) {
+
+		if (RS != nullptr) {
+
+			TheRewriter.InsertTextBefore(RS->getLocStart(),
+			                             "__clpkm_hdr[__clpkm_id] = 0;");
+
+			}
+
+		return true;
+
+		}
+
 	// Patch barrier
 	bool VisitCallExpr(CallExpr* CE) {
 
@@ -217,7 +230,8 @@ private:
 		else {
 
 			TheRewriter.InsertTextBefore(Body->getLocStart(), " { ");
-			TheRewriter.InsertTextAfterToken(Body->getLocEnd(), InstCR += " } ");
+			TheRewriter.InsertTextAfterToken(Body->getStmtLocEnd(),
+			                                 InstCR += " } ");
 
 			}
 

@@ -22,7 +22,7 @@ index 56b99cc..8acd8d7 100644
    /// value-dependent (C++ [temp.dep.constexpr]). For example, the
    /// array bound of "Chars" in the following example is
 diff --git a/include/clang/AST/Stmt.h b/include/clang/AST/Stmt.h
-index e28675d..24e3ce5 100644
+index e28675d..62a5a36 100644
 --- a/include/clang/AST/Stmt.h
 +++ b/include/clang/AST/Stmt.h
 @@ -358,6 +358,9 @@ public:
@@ -35,7 +35,15 @@ index e28675d..24e3ce5 100644
    // global temp stats (until we have a per-module visitor)
    static void addStmtClass(const StmtClass s);
    static void EnableStatistics();
-@@ -536,6 +539,7 @@ public:
+@@ -475,6 +478,7 @@ public:
+ 
+   SourceLocation getLocStart() const LLVM_READONLY { return StartLoc; }
+   SourceLocation getLocEnd() const LLVM_READONLY { return EndLoc; }
++  SourceLocation getStmtLocEnd() const LLVM_READONLY { return EndLoc; }
+ 
+   static bool classof(const Stmt *T) {
+     return T->getStmtClass() == DeclStmtClass;
+@@ -536,6 +540,7 @@ public:
  
    SourceLocation getLocStart() const LLVM_READONLY { return SemiLoc; }
    SourceLocation getLocEnd() const LLVM_READONLY { return SemiLoc; }
@@ -43,7 +51,7 @@ index e28675d..24e3ce5 100644
  
    static bool classof(const Stmt *T) {
      return T->getStmtClass() == NullStmtClass;
-@@ -628,6 +632,7 @@ public:
+@@ -628,6 +633,7 @@ public:
  
    SourceLocation getLocStart() const LLVM_READONLY { return LBraceLoc; }
    SourceLocation getLocEnd() const LLVM_READONLY { return RBraceLoc; }
@@ -51,7 +59,7 @@ index e28675d..24e3ce5 100644
  
    SourceLocation getLBracLoc() const { return LBraceLoc; }
    SourceLocation getRBracLoc() const { return RBraceLoc; }
-@@ -945,6 +950,12 @@ public:
+@@ -945,6 +951,12 @@ public:
      else
        return SubExprs[THEN]->getLocEnd();
    }
@@ -64,7 +72,7 @@ index e28675d..24e3ce5 100644
  
    // Iterators over subexpressions.  The iterators will include iterating
    // over the initialization expression referenced by the condition variable.
-@@ -1091,6 +1102,9 @@ public:
+@@ -1091,6 +1103,9 @@ public:
    SourceLocation getLocEnd() const LLVM_READONLY {
      return SubExprs[BODY]->getLocEnd();
    }
@@ -74,7 +82,7 @@ index e28675d..24e3ce5 100644
  
    static bool classof(const Stmt *T) {
      return T->getStmtClass() == WhileStmtClass;
-@@ -1110,11 +1124,12 @@ class DoStmt : public Stmt {
+@@ -1110,11 +1125,12 @@ class DoStmt : public Stmt {
    Stmt* SubExprs[END_EXPR];
    SourceLocation WhileLoc;
    SourceLocation RParenLoc;  // Location of final ')' in do stmt condition.
@@ -89,7 +97,7 @@ index e28675d..24e3ce5 100644
      SubExprs[COND] = reinterpret_cast<Stmt*>(cond);
      SubExprs[BODY] = body;
    }
-@@ -1137,8 +1152,12 @@ public:
+@@ -1137,8 +1153,12 @@ public:
    SourceLocation getRParenLoc() const { return RParenLoc; }
    void setRParenLoc(SourceLocation L) { RParenLoc = L; }
  
@@ -102,7 +110,7 @@ index e28675d..24e3ce5 100644
  
    static bool classof(const Stmt *T) {
      return T->getStmtClass() == DoStmtClass;
-@@ -1213,6 +1232,9 @@ public:
+@@ -1213,6 +1233,9 @@ public:
    SourceLocation getLocEnd() const LLVM_READONLY {
      return SubExprs[BODY]->getLocEnd();
    }
@@ -112,7 +120,7 @@ index e28675d..24e3ce5 100644
  
    static bool classof(const Stmt *T) {
      return T->getStmtClass() == ForStmtClass;
-@@ -1370,18 +1392,22 @@ public:
+@@ -1370,18 +1393,22 @@ public:
  ///
  class ReturnStmt : public Stmt {
    SourceLocation RetLoc;
@@ -139,7 +147,7 @@ index e28675d..24e3ce5 100644
  
    const Expr *getRetValue() const;
    Expr *getRetValue();
-@@ -1402,6 +1428,9 @@ public:
+@@ -1402,6 +1429,9 @@ public:
    SourceLocation getLocEnd() const LLVM_READONLY {
      return RetExpr ? RetExpr->getLocEnd() : RetLoc;
    }

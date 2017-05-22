@@ -10,8 +10,8 @@ EXE=$(realpath "$0")
 DIR=$(dirname "$EXE")
 OUT="${2%%.cl}"
 
-LLVM_CONFIG=~/llvm-4.0.0-dbg/bin/llvm-config
-CXX=~/llvm-4.0.0/bin/clang++
+LLVM_CONFIG=~/llvm-4.0.1-dbg/bin/llvm-config
+CXX=~/llvm-4.0.1/bin/clang++
 INC="-I $HOME/libclc/generic/include -include clc/clc.h"
 
 if ! make -C "$DIR" CXX="$CXX" LLVM_CONFIG="$LLVM_CONFIG" -j 8; then
@@ -19,7 +19,7 @@ if ! make -C "$DIR" CXX="$CXX" LLVM_CONFIG="$LLVM_CONFIG" -j 8; then
 	exit
 fi
 
-export LD_LIBRARY_PATH="$HOME"/llvm-4.0.0-dbg/lib
+export LD_LIBRARY_PATH="$HOME"/llvm-4.0.1-dbg/lib
 set -x
 
 # Check user provided file before proceed

@@ -84,32 +84,20 @@ public:
 
 		}
 
-	bool VisitDoStmt(DoStmt* DS) {
-
-		if (DS == nullptr)
-			return true;
-
-		return AppendBrace(DS->getBody());
-
-		}
-
 private:
 	CompilerInstance& TheCI;
 	Rewriter&         TheRewriter;
 
 	bool AppendBrace(Stmt* S) {
 
-		if (S == nullptr || !isa<Expr>(S))
+		if (S == nullptr || isa<CompoundStmt>(S))
 			return true;
 
-		auto LocEnd = Lexer::findLocationAfterToken(S->getLocEnd(),
-		                                            tok::semi,
-		                                            TheCI.getSourceManager(),
-		                                            TheCI.getLangOpts(),
-		                                            false);
+		if (!S->getStmtLocEnd().isValid())
+			llvm_unreachable("getStmtLocEnd returned invalid location :(");
 
 		TheRewriter.InsertTextBefore(S->getLocStart(), " { ");
-		TheRewriter.InsertTextAfterToken(LocEnd, " } ");
+		TheRewriter.InsertTextAfterToken(S->getStmtLocEnd(), " } ");
 
 		return true;
 
