@@ -3,10 +3,11 @@
 //
 // Modified from Eli's tooling example
 //===----------------------------------------------------------------------===//
+
 #include <string>
 #include <utility>
 
-#include "clang/Analysis/CFG.h"
+#include "clang/Analysis/Analyses/LiveVariables.h"
 #include "clang/AST/AST.h"
 #include "clang/AST/ASTConsumer.h"
 #include "clang/AST/RecursiveASTVisitor.h"
@@ -21,6 +22,7 @@
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
+#include "LiveVarTracker.hpp"
 
 #define DEBUG_TYPE "clpkmcc"
 
@@ -34,10 +36,8 @@ static llvm::cl::OptionCategory CLPKMCCCategory("CLPKMCC");
 
 class Extractor : public RecursiveASTVisitor<Extractor> {
 public:
-	Extractor(Rewriter& R, CompilerInstance& CI) :
-		TheRewriter(R), TheCI(CI) {
-		;
-		}
+	Extractor(Rewriter& R, CompilerInstance& CI)
+	: TheRewriter(R), TheCI(CI) { }
 
 	bool VisitSwitchStmt(SwitchStmt* SS) {
 
@@ -65,6 +65,15 @@ public:
 			                             "__clpkm_hdr[__clpkm_id] = 0;");
 
 			}
+
+		return true;
+
+		}
+
+	bool VisitVarDecl(VarDecl* VD) {
+
+		if (VD != nullptr)
+			LVT.AddTrack(VD);
 
 		return true;
 
@@ -180,14 +189,18 @@ public:
 
 		TheRewriter.InsertTextBefore(FuncDecl->getBody()->getLocEnd(),
 		                             "\n  }\n  __clpkm_hdr[__clpkm_id] = 0;\n");
+		LVT.SetContext(FuncDecl);
+		bool Ret = RecursiveASTVisitor<Extractor>::TraverseFunctionDecl(FuncDecl);
+		LVT.EndContext();
 
-		return RecursiveASTVisitor<Extractor>::TraverseFunctionDecl(FuncDecl);
+		return Ret;
 
 		}
 
 private:
 	Rewriter&         TheRewriter;
 	CompilerInstance& TheCI;
+	LiveVarTracker    LVT;
 
 	size_t CostCounter;
 	size_t Nonce;
@@ -246,10 +259,8 @@ private:
 class ExtractorDriver : public ASTConsumer {
 public:
 	template <class ... P>
-	ExtractorDriver(P&& ... Param) :
-		Visitor(std::forward<P>(Param)...) {
-
-		}
+	ExtractorDriver(P&& ... Param)
+	: Visitor(std::forward<P>(Param)...) { }
 
 	bool HandleTopLevelDecl(DeclGroupRef DeclGroup) override {
 

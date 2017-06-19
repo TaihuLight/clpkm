@@ -1,7 +1,7 @@
 CXX         := clang++
 LLVM_CONFIG := llvm-config
 
-CXXFLAGS := $(shell $(LLVM_CONFIG) --cxxflags)
+CXXFLAGS := $(shell $(LLVM_CONFIG) --cxxflags) -std=c++14
 LDFLAGS  := $(shell $(LLVM_CONFIG) --ldflags)
 LIBS     := -Wl,--start-group $(shell $(LLVM_CONFIG) --libs) \
             -lclangAST -lclangAnalysis -lclangBasic -lclangCodeGen \
