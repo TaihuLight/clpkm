@@ -5,9 +5,14 @@
 
 */
 
+#ifndef __CLPKM__LIVE_VAR_HELPER_HPP__
+#define __CLPKM__LIVE_VAR_HELPER_HPP__
+
 #include "clang/Analysis/Analyses/LiveVariables.h"
 #include "clang/Analysis/CFGStmtMap.h"
 #include <unordered_set>
+
+
 
 class LiveVarTracker {
 private:
@@ -104,3 +109,7 @@ private:
 	tracker_type Tracker;
 
 	};
+
+
+
+#endif

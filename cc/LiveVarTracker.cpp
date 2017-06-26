@@ -7,19 +7,21 @@
 
 #include "LiveVarTracker.hpp"
 
+using namespace clang;
 
 
-bool LiveVarTracker::SetContext(const clang::Decl* D) {
+
+bool LiveVarTracker::SetContext(const Decl* D) {
 
 	this->EndContext();
-	Manager = new clang::AnalysisDeclContextManager;
+	Manager = new AnalysisDeclContextManager;
 	Context = Manager->getContext(D);
 
 	// Or it will skil sub-exprs
 	Context->getCFGBuildOptions().setAllAlwaysAdd();
 
-	LiveVar = clang::LiveVariables::computeLiveness(
-			*Context,	/* killAtAssign */ false);
+	LiveVar = LiveVariables::computeLiveness(*Context,
+	                                         /* killAtAssign */ false);
 	Map = Context->getCFGStmtMap();
 
 	// TODO
@@ -40,12 +42,12 @@ void LiveVarTracker::EndContext() {
 
 	}
 
-bool LiveVarTracker::IsLiveAfter(clang::VarDecl* VD, clang::Stmt* S) const {
+bool LiveVarTracker::IsLiveAfter(VarDecl* VD, Stmt* S) const {
 
 	if (VD == nullptr || S == nullptr || LiveVar == nullptr || Map == nullptr)
 		return false;
 
-	clang::CFGBlock* B = Map->getBlock(S);
+	CFGBlock* B = Map->getBlock(S);
 
 	// The given Stmt is not in the CFGMap???
 	if (B == nullptr)
