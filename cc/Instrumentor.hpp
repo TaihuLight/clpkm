@@ -15,6 +15,9 @@
 #include "clang/Frontend/CompilerInstance.h"
 #include "clang/Rewrite/Core/Rewriter.h"
 
+#include <string>
+#include <utility>
+
 
 
 class Instrumentor : public clang::RecursiveASTVisitor<Instrumentor> {
@@ -57,6 +60,10 @@ private:
 
 	bool PatchLoopBody(size_t OldCost, size_t NewCost, clang::Stmt* Loop,
 	                   clang::Expr* Cond, clang::Stmt* Body);
+
+	// Covfefe = checkpoint/resume code to inject
+	using Covfefe = std::pair<std::string, std::string>;
+	Covfefe GenerateCovfefe(clang::Stmt* S);
 
 	clang::Rewriter&         TheRewriter;
 	clang::CompilerInstance& TheCI;

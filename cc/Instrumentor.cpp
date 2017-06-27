@@ -184,14 +184,16 @@ bool Instrumentor::PatchLoopBody(size_t OldCost, size_t NewCost,
 
 		}
 
+	Covfefe C = GenerateCovfefe(Body);
 	std::string ThisNonce = std::to_string(++Nonce);
-	std::string InstCR = " __clpkm_ctr += " +
-	                     std::to_string(NewCost - OldCost) + "; case " +
-	                     ThisNonce + ": "
-	                     "if (__clpkm_ctr > __clpkm_tlv) {"
-	                     "  __clpkm_hdr[__clpkm_id] = " + ThisNonce +
-	                     "; /* C */ return; } "
-	                     "else if (__clpkm_ctr <= 0) { /* R */ } ";
+	std::string InstCR =
+			" __clpkm_ctr += " + std::to_string(NewCost - OldCost) + ";"
+			" case " + ThisNonce + ":"
+			" if (__clpkm_ctr > __clpkm_tlv) {"
+				"  __clpkm_hdr[__clpkm_id] = " + ThisNonce + "; " +
+				std::move(C.first) + " return;"
+			" } else if (__clpkm_ctr <= 0) { " +
+				std::move(C.second) + " } ";
 
 	if (isa<CompoundStmt>(Body))
 		TheRewriter.InsertTextBefore(Body->getLocEnd(), InstCR);
@@ -204,5 +206,56 @@ bool Instrumentor::PatchLoopBody(size_t OldCost, size_t NewCost,
 		}
 
 	return true;
+
+	}
+
+auto Instrumentor::GenerateCovfefe(Stmt* S) -> Covfefe {
+
+	// The first is for checkpoint, and the second is for resume
+	Covfefe C;
+	size_t AccSize = 0;
+
+	for (VarDecl* VD : this->LVT.GenLivenessAfter(S)) {
+
+		QualType QT = VD->getType();
+		TypeInfo TI = VD->getASTContext().getTypeInfo(QT);
+
+		switch (QT.getAddressSpace()) {
+		// No need to store global stuff
+		case LangAS::opencl_global:
+		case LangAS::opencl_constant:
+			break;
+
+		case LangAS::opencl_local:
+			// TODO
+			break;
+
+		// clang::LangAS::Default, IIUC, private
+		case 0:
+			// New scope to deal with bypassing initialization
+			{
+				const char* VarName = VD->getIdentifier()->getNameStart();
+				std::string Size = std::to_string(TI.Width / 8);
+				std::string P = "(__clpkm_prv, "
+				                "&" + std::string(VarName) + ", " +
+				                Size + "); "
+				                "__clpkm_prv += " + Size + "; ";
+				C.first += "__clpkm_store_private";
+				C.first += P;
+				C.second += "__clpkm_load_private";
+				C.second += std::move(P);
+				AccSize += (TI.Width / 8);
+
+				}
+			break;
+
+		default:
+			llvm_unreachable("Unexpected address space :(");
+
+			}
+
+		}
+
+	return C;
 
 	}
