@@ -82,7 +82,9 @@ public:
 		};
 
 	// Default stuff
-	LiveVarTracker() = default;
+	LiveVarTracker()
+	: Manager(nullptr), Context(nullptr), Map(nullptr), LiveVar(nullptr) { }
+
 	~LiveVarTracker() { this->EndContext(); }
 	LiveVarTracker(const LiveVarTracker& ) = delete;
 

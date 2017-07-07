@@ -8,6 +8,7 @@
 #ifndef __CLPKM__INSTRUMENTOR_HPP__
 #define __CLPKM__INSTRUMENTOR_HPP__
 
+#include "KernelProfile.hpp"
 #include "LiveVarTracker.hpp"
 
 #include "clang/AST/RecursiveASTVisitor.h"
@@ -22,8 +23,9 @@
 
 class Instrumentor : public clang::RecursiveASTVisitor<Instrumentor> {
 public:
-	Instrumentor(clang::Rewriter& R, clang::CompilerInstance& CI)
-	: TheRewriter(R), TheCI(CI) { }
+	Instrumentor(clang::Rewriter& R, clang::CompilerInstance& CI,
+	             ProfileList& PL)
+	: TheRewriter(R), TheCI(CI), ThePL(PL) { }
 
 	// Forbid switch
 	bool VisitSwitchStmt(clang::SwitchStmt* );
@@ -63,10 +65,11 @@ private:
 
 	// Covfefe = checkpoint/resume code to inject
 	using Covfefe = std::pair<std::string, std::string>;
-	Covfefe GenerateCovfefe(clang::Stmt* S);
+	Covfefe GenerateCovfefe(clang::Stmt* );
 
 	clang::Rewriter&         TheRewriter;
 	clang::CompilerInstance& TheCI;
+	ProfileList&             ThePL;
 
 	LiveVarTracker LVT;
 

@@ -46,6 +46,12 @@ bool Instrumentor::VisitVarDecl(VarDecl* VD) {
 	if (VD != nullptr)
 		LVT.AddTrack(VD);
 
+	QualType QT = VD->getType();
+	TypeInfo TI = VD->getASTContext().getTypeInfo(QT);
+
+	if (QT.getAddressSpace() == LangAS::opencl_local)
+		ThePL.back().ReqLocSize += (TI.Width + 7) / 8;
+
 	return true;
 
 	}
@@ -112,39 +118,35 @@ bool Instrumentor::TraverseFunctionDecl(FunctionDecl* FuncDecl) {
 	if (FuncDecl == nullptr || !FuncDecl->hasAttr<OpenCLKernelAttr>())
 		return true;
 
+	unsigned NumOfParam = FuncDecl->getNumParams();
+
 	// FIXME: I can't figure out a graceful way to do this at the moment
 	//        It's uncommon anyway
-	if (auto ParamSize = FuncDecl->param_size(); ParamSize <= 0) {
+	if (NumOfParam <= 0) {
 
-			// TODO: remove body of nullary function?
-			DiagReport(FuncDecl->getNameInfo().getLoc(), 
-			           DiagnosticsEngine::Level::Warning,
-			           "skipping nullary function");
-			return true;
-
-			}
-	// Append arguments
-	else {
-
-		auto LastParam = FuncDecl->getParamDecl(ParamSize - 1);
-		auto InsertCut = LastParam->getSourceRange().getEnd();
-		const char* CLPKMParam = ", __global int * __clpkm_hdr, "
-		                         "__global char * __clpkm_local, "
-		                         "__global char * __clpkm_prv, "
-		                         "__const size_t __clpkm_tlv";
-
-		TheRewriter.InsertTextAfterToken(InsertCut, CLPKMParam);
+		// TODO: remove body of nullary function?
+		DiagReport(FuncDecl->getNameInfo().getLoc(),
+		           DiagnosticsEngine::Level::Warning,
+		           "skipping nullary function");
+		return true;
 
 		}
 
+	// Append arguments
+	auto LastParam = FuncDecl->getParamDecl(NumOfParam - 1);
+	auto InsertCut = LastParam->getSourceRange().getEnd();
+	const char* CLPKMParam = ", __global int * __clpkm_hdr, "
+	                         "__global char * __clpkm_local, "
+	                         "__global char * __clpkm_prv, "
+	                         "__const size_t __clpkm_tlv";
+
+	TheRewriter.InsertTextAfterToken(InsertCut, CLPKMParam);
+
+	// Don't traverse function declaration
 	if (!FuncDecl->hasBody())
 		return true;
 
-	CostCounter = 0;
-	Nonce = 1;
-
-	std::string FuncName = FuncDecl->getNameInfo().getName().getAsString();
-
+	// Inject main control flow
 	TheRewriter.InsertTextAfterToken(
 		FuncDecl->getBody()->getLocStart(),
 		"\n  size_t __clpkm_id = get_global_linear_id();\n"
@@ -155,8 +157,17 @@ bool Instrumentor::TraverseFunctionDecl(FunctionDecl* FuncDecl) {
 
 	TheRewriter.InsertTextBefore(FuncDecl->getBody()->getLocEnd(),
 	                             "\n  }\n  __clpkm_hdr[__clpkm_id] = 0;\n");
+
+	// Preparation for traversal
+	ThePL.emplace_back(FuncDecl->getNameInfo().getName().getAsString(), NumOfParam);
 	LVT.SetContext(FuncDecl);
+	CostCounter = 0;
+	Nonce = 1;
+
+	// Traverse
 	bool Ret = RecursiveASTVisitor<Instrumentor>::TraverseFunctionDecl(FuncDecl);
+
+	// Cleanup
 	LVT.EndContext();
 
 	return Ret;
@@ -213,7 +224,7 @@ auto Instrumentor::GenerateCovfefe(Stmt* S) -> Covfefe {
 
 	// The first is for checkpoint, and the second is for resume
 	Covfefe C;
-	size_t AccSize = 0;
+	size_t ReqPrvSize = 0;
 
 	for (VarDecl* VD : this->LVT.GenLivenessAfter(S)) {
 
@@ -235,16 +246,17 @@ auto Instrumentor::GenerateCovfefe(Stmt* S) -> Covfefe {
 			// New scope to deal with bypassing initialization
 			{
 				const char* VarName = VD->getIdentifier()->getNameStart();
-				std::string Size = std::to_string(TI.Width / 8);
-				std::string P = "(__clpkm_prv, "
-				                "&" + std::string(VarName) + ", " +
-				                Size + "); "
-				                "__clpkm_prv += " + Size + "; ";
+				size_t Size = (TI.Width + 7) / 8;
+
+				std::string P = "(__clpkm_prv+" +
+				                std::to_string(ReqPrvSize) +
+				                ", &" + std::string(VarName) + ", " +
+				                std::to_string(Size) + "); ";
 				C.first += "__clpkm_store_private";
 				C.first += P;
 				C.second += "__clpkm_load_private";
 				C.second += std::move(P);
-				AccSize += (TI.Width / 8);
+				ReqPrvSize += Size;
 
 				}
 			break;
@@ -255,6 +267,10 @@ auto Instrumentor::GenerateCovfefe(Stmt* S) -> Covfefe {
 			}
 
 		}
+
+	// Update max requested size
+	size_t OldReqSize = ThePL.back().ReqPrvSize;
+	ThePL.back().ReqPrvSize = std::max(OldReqSize, ReqPrvSize);
 
 	return C;
 
