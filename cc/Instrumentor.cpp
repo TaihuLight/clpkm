@@ -146,6 +146,24 @@ bool Instrumentor::TraverseFunctionDecl(FunctionDecl* FuncDecl) {
 	if (!FuncDecl->hasBody())
 		return true;
 
+	// Put a new entry into the kernel profile list
+	ThePL.emplace_back(FuncDecl->getNameInfo().getName().getAsString(), NumOfParam);
+
+	// Collect info of kernel parameters that point to local memory
+	// The size of these buffers are not deterministic here
+	unsigned ParamIdx = 0;
+	for (ParmVarDecl* PVD : FuncDecl->parameters()) {
+		if (QualType QT = PVD->getType(); QT->isPointerType()) {
+			if (QualType PointeeQT = QT->getPointeeType();
+			    PointeeQT.getAddressSpace() == LangAS::opencl_local)
+				ThePL.back().LocPtrParamIdx.emplace_back(ParamIdx);
+//			QualType PointeeQT = QT->getPointeeType();
+//			llvm::errs() << "---> "<< PointeeQT.getAsString() << ' '
+//			             << PVD->getIdentifier()->getNameStart() << '\n';
+			}
+		++ParamIdx;
+		}
+
 	// Inject main control flow
 	TheRewriter.InsertTextAfterToken(
 		FuncDecl->getBody()->getLocStart(),
@@ -159,7 +177,6 @@ bool Instrumentor::TraverseFunctionDecl(FunctionDecl* FuncDecl) {
 	                             "\n  }\n  __clpkm_hdr[__clpkm_id] = 0;\n");
 
 	// Preparation for traversal
-	ThePL.emplace_back(FuncDecl->getNameInfo().getName().getAsString(), NumOfParam);
 	LVT.SetContext(FuncDecl);
 	CostCounter = 0;
 	Nonce = 1;

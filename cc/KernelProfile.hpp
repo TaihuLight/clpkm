@@ -9,9 +9,9 @@
 #define __CLPKM__KERNEL_PROFILE_HPP__
 
 #include "llvm/Support/YAMLTraits.h"
-#include <deque>
 #include <cstddef>
 #include <string>
+#include <vector>
 
 
 
@@ -22,6 +22,9 @@ struct KernelProfile {
 	size_t      ReqPrvSize;
 	size_t      ReqLocSize;
 
+	// Hope it won't be too long and the STL impl got SVO
+	std::vector<unsigned> LocPtrParamIdx;
+
 	KernelProfile() = default;
 
 	KernelProfile(std::string&& N, unsigned NP)
@@ -29,7 +32,7 @@ struct KernelProfile {
 
 	};
 
-using ProfileList = std::deque<KernelProfile>;
+using ProfileList = std::vector<KernelProfile>;
 
 
 
@@ -40,6 +43,7 @@ struct llvm::yaml::MappingTraits<KernelProfile> {
 		Io.mapRequired("num-of-param", KP.NumOfParam);
 		Io.mapRequired("req-private",    KP.ReqPrvSize);
 		Io.mapOptional("req-local",  KP.ReqLocSize, std::size_t(0));
+		Io.mapOptional("loc-ptr-param-idx", KP.LocPtrParamIdx);
 		}
 	};
 
