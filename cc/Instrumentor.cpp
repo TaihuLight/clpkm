@@ -32,6 +32,7 @@ bool Instrumentor::VisitReturnStmt(ReturnStmt* RS) {
 
 	if (RS != nullptr) {
 
+		// PP should have added braces for return statements
 		TheRewriter.InsertTextBefore(RS->getLocStart(),
 		                             "__clpkm_hdr[__clpkm_id] = 0;");
 
@@ -118,6 +119,13 @@ bool Instrumentor::TraverseFunctionDecl(FunctionDecl* FuncDecl) {
 	if (FuncDecl == nullptr || !FuncDecl->hasAttr<OpenCLKernelAttr>())
 		return true;
 
+	std::string ReqPrvSizeVar = "__clpkm_req_prv_size_"
+			+ FuncDecl->getNameInfo().getName().getAsString();
+
+	// Forward declaration max requested size, we don't know the answer atm
+	TheRewriter.InsertTextBefore(FuncDecl->getLocStart(),
+		"extern __constant size_t " + ReqPrvSizeVar + ";\n");
+
 	unsigned NumOfParam = FuncDecl->getNumParams();
 
 	// FIXME: I can't figure out a graceful way to do this at the moment
@@ -167,8 +175,9 @@ bool Instrumentor::TraverseFunctionDecl(FunctionDecl* FuncDecl) {
 	// Inject main control flow
 	TheRewriter.InsertTextAfterToken(
 		FuncDecl->getBody()->getLocStart(),
-		"\n  size_t __clpkm_id = get_global_linear_id();\n"
+		"\n  size_t __clpkm_id = __get_global_linear_id();\n"
 		"  size_t __clpkm_ctr = 0;\n"
+		"  __clpkm_prv += __clpkm_id * " + std::string(ReqPrvSizeVar) + ";\n"
 		"  switch (__clpkm_hdr[__clpkm_id]) {\n"
 		"  default:  return;\n"
 		"  case 1: ;\n");
@@ -186,6 +195,11 @@ bool Instrumentor::TraverseFunctionDecl(FunctionDecl* FuncDecl) {
 
 	// Cleanup
 	LVT.EndContext();
+
+	// Emit max requested size
+	TheRewriter.InsertTextAfterToken(FuncDecl->getLocEnd(),
+		"\n__constant size_t " + ReqPrvSizeVar + " = "
+		+ std::to_string(ThePL.back().ReqPrvSize)+";");
 
 	return Ret;
 
