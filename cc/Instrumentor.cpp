@@ -111,9 +111,6 @@ bool Instrumentor::TraverseWhileStmt(WhileStmt* WS) {
 
 	}
 
-// 1.   Patch arguments
-// 2.   Re-arrange BBs
-// 3.   Insert Checkpoint/Resume codes
 bool Instrumentor::TraverseFunctionDecl(FunctionDecl* FuncDecl) {
 
 	if (FuncDecl == nullptr || !FuncDecl->hasAttr<OpenCLKernelAttr>())
