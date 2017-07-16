@@ -143,7 +143,7 @@ bool Instrumentor::TraverseFunctionDecl(FunctionDecl* FuncDecl) {
 	const char* CLPKMParam = ", __global int * __clpkm_hdr, "
 	                         "__global char * __clpkm_local, "
 	                         "__global char * __clpkm_prv, "
-	                         "__const size_t __clpkm_tlv";
+	                         "__const ulong __clpkm_tlv";
 
 	TheRewriter.InsertTextAfterToken(InsertCut, CLPKMParam);
 
