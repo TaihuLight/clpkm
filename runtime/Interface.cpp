@@ -9,6 +9,7 @@
 
 #include "CompilerDriver.hpp"
 #include "KernelProfile.hpp"
+#include "RuntimeKeeper.hpp"
 
 #include <cstring>
 #include <memory>
@@ -43,10 +44,11 @@ cl_int clGetProgramBuildInfo(cl_program Program, cl_device_id Device,
                              size_t ParamValSize, void* ParamVal,
                              size_t* ParamValSizeRet) {
 
-	auto It = CLPKM::ProgramTable.find(Program);
+	auto& PT = CLPKM::getRuntimeKeeper().getProgramTable();
+	auto It = PT.find(Program);
 
 	// FIXME: custom CL_PROGRAM_BUILD_LOG
-	if (It != CLPKM::ProgramTable.end())
+	if (It != PT.end())
 		Program = It->second.ShadowProgram;
 
 	static auto Impl = reinterpret_cast<decltype(&clGetProgramBuildInfo)>(
@@ -102,10 +104,11 @@ cl_int clBuildProgram(cl_program Program,
 	                                                Options, PL);
 	const char* Ptr = &InstrumentedSource[0];
 	const size_t Len = InstrumentedSource.size();
+	auto& PT = CLPKM::getRuntimeKeeper().getProgramTable();
 
 	// FIXME
 	if (InstrumentedSource.empty()) {
-		CLPKM::ProgramTable[Program].BuildLog = "";
+		PT[Program].BuildLog = "";
 		return CL_BUILD_PROGRAM_FAILURE;
 		}
 
@@ -116,8 +119,9 @@ cl_int clBuildProgram(cl_program Program,
 	if (Ret != CL_SUCCESS)
 		return Ret;
 
-	CLPKM::ProgramTable[Program].ShadowProgram = ShadowProgram;
-	CLPKM::ProgramTable[Program].KernelProfileList = std::move(PL);
+	auto& Entry = PT[Program];
+	Entry.ShadowProgram = ShadowProgram;
+	Entry.KernelProfileList = std::move(PL);
 
 	static auto Impl = reinterpret_cast<decltype(&clBuildProgram)>(
 	                dlsym(RTLD_NEXT, "clBuildProgram"));
@@ -132,9 +136,10 @@ cl_int clBuildProgram(cl_program Program,
 
 cl_kernel clCreateKernel(cl_program Program, const char* Name, cl_int* Ret) {
 
-	auto It = CLPKM::ProgramTable.find(Program);
+	auto& PT = CLPKM::getRuntimeKeeper().getProgramTable();
+	auto It = PT.find(Program);
 
-	if (It == CLPKM::ProgramTable.end()) {
+	if (It == PT.end()) {
 		if (Ret != nullptr)
 			*Ret = CL_INVALID_PROGRAM;
 		return NULL;
@@ -162,7 +167,7 @@ cl_kernel clCreateKernel(cl_program Program, const char* Name, cl_int* Ret) {
 	cl_kernel Kernel = Impl(It->second.ShadowProgram, Name, Ret);
 
 	if (Kernel != NULL)
-		CLPKM::KernelTable[Kernel].Profile = &(*Pos);
+		CLPKM::getRuntimeKeeper().getKernelTable()[Kernel].Profile = &(*Pos);
 
 	return Kernel;
 
@@ -180,9 +185,10 @@ cl_int clEnqueueNDRangeKernel(cl_command_queue Queue,
                               const cl_event* WaitingList,
                               cl_event* Event) {
 
-	auto It = CLPKM::KernelTable.find(Kernel);
+	auto& KT = CLPKM::getRuntimeKeeper().getKernelTable();
+	auto It = KT.find(Kernel);
 
-	if (It == CLPKM::KernelTable.end())
+	if (It == KT.end())
 		return CL_INVALID_KERNEL;
 
 	auto& Profile = *(It->second).Profile;
@@ -218,7 +224,7 @@ cl_int clEnqueueNDRangeKernel(cl_command_queue Queue,
 	if (Ret != CL_SUCCESS)
 		return Ret;
 
-	cl_ulong Threshold = 100;
+	cl_ulong Threshold = CLPKM::getRuntimeKeeper().getCRThreshold();
 
 	std::fill(&Header[0], &Header[NumOfThread], 1);
 
