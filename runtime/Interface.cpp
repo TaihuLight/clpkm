@@ -12,9 +12,9 @@
 #include "RuntimeKeeper.hpp"
 
 #include <cstring>
-#include <memory>
-#include <mutex>
 #include <string>
+#include <vector>
+
 #include <dlfcn.h>
 #include <CL/opencl.h>
 
@@ -47,9 +47,20 @@ cl_int clGetProgramBuildInfo(cl_program Program, cl_device_id Device,
 	auto& PT = CLPKM::getRuntimeKeeper().getProgramTable();
 	auto It = PT.find(Program);
 
-	// FIXME: custom CL_PROGRAM_BUILD_LOG
-	if (It != PT.end())
-		Program = It->second.ShadowProgram;
+	// Found
+	if (It != PT.end()) {
+		// If its shadow is valid, use shadow
+		if (It->second.ShadowProgram != NULL)
+			Program = It->second.ShadowProgram;
+		// If not, we can intercept CL_PROGRAM_BUILD_LOG
+		else if (ParamName == CL_PROGRAM_BUILD_LOG) {
+			if (ParamVal != nullptr && ParamValSize > It->second.BuildLog.size())
+				strcpy(static_cast<char*>(ParamVal), It->second.BuildLog.c_str());
+			if (ParamValSizeRet != nullptr)
+				*ParamValSizeRet = It->second.BuildLog.size() + 1;
+			return CL_SUCCESS;
+			}
+		}
 
 	static auto Impl = reinterpret_cast<decltype(&clGetProgramBuildInfo)>(
 	                   		dlsym(RTLD_NEXT, "clGetProgramBuildInfo"));
@@ -66,55 +77,60 @@ cl_int clBuildProgram(cl_program Program,
                       void (*Notify)(cl_program, void* ),
                       void* UserData) {
 
-	std::unique_ptr<char[]> Source;
+	std::string Source;
 	size_t SourceLength = 0;
 
-	cl_int Ret = clGetProgramInfo(Program, CL_PROGRAM_SOURCE,
-                                 0, nullptr, &SourceLength);
+	cl_int Ret = clGetProgramInfo(Program, CL_PROGRAM_SOURCE, 0, nullptr,
+	                              &SourceLength);
 
 	if (Ret != CL_SUCCESS)
 		return Ret;
 
-	// Retrieve the source to instrument
-	Source = std::make_unique<char[]>(SourceLength);
-	Ret = clGetProgramInfo(Program, CL_PROGRAM_SOURCE,
-	                       SourceLength, Source.get(), nullptr);
+	// Must be greater than zero because the size includes null terminator
+	assert(SourceLength > 0);
 
-	if (Ret != CL_SUCCESS)
-		return Ret;
-
-	// If the program is created via clCreateProgramWithBinary or so, it returns
-	// a null string
+	// If the program is created via clCreateProgramWithBinary or is a built-in
+	// kernel, it returns a null string
 	// TODO: we may want to support this?
-	if (Source[0] == '\0')
+	if (SourceLength == 1)
 		throw std::runtime_error("Yet impl'd");
+
+	// Retrieve the source to instrument and remove the null terminator
+	Source.resize(SourceLength, '\0');
+	Ret = clGetProgramInfo(Program, CL_PROGRAM_SOURCE, SourceLength,
+	                       Source.data(), nullptr);
+	Source.resize(SourceLength - 1);
+
+	if (Ret != CL_SUCCESS)
+		return Ret;
 
 	cl_context Context;
 
 	// Retrieve the context to build a new program
-	Ret = clGetProgramInfo(Program, CL_PROGRAM_CONTEXT,
-	                       sizeof(Context), &Context, nullptr);
+	Ret = clGetProgramInfo(Program, CL_PROGRAM_CONTEXT, sizeof(Context),
+	                       &Context, nullptr);
 
 	if (Ret != CL_SUCCESS)
 		return Ret;
 
-	// Now invoke CLPKMCC
-	ProfileList PL;
-	std::string InstrumentedSource = CLPKM::Compile(Source.get(), SourceLength,
-	                                                Options, PL);
-	const char* Ptr = &InstrumentedSource[0];
-	const size_t Len = InstrumentedSource.size();
 	auto& PT = CLPKM::getRuntimeKeeper().getProgramTable();
+	ProfileList PL;
 
-	// FIXME
-	if (InstrumentedSource.empty()) {
-		PT[Program].BuildLog = "";
+	// Now invoke CLPKMCC
+	if (!CLPKM::Compile(Source, Options, PL)) {
+		auto& Entry = PT[Program];
+		Entry.ShadowProgram = NULL;
+		Entry.BuildLog = std::move(Source);
+		Entry.KernelProfileList.clear();
 		return CL_BUILD_PROGRAM_FAILURE;
 		}
 
+	const char* Ptr = Source.data();
+	const size_t Len = Source.size();
+
 	// Build a new program with instrumented code
-	cl_program ShadowProgram =
-			clCreateProgramWithSource(Context, 1, &Ptr, &Len, &Ret);
+	cl_program ShadowProgram = clCreateProgramWithSource(Context, 1, &Ptr, &Len,
+	                                                     &Ret);
 
 	if (Ret != CL_SUCCESS)
 		return Ret;
@@ -173,8 +189,6 @@ cl_kernel clCreateKernel(cl_program Program, const char* Name, cl_int* Ret) {
 
 	}
 
-//cl_int clSetKernelArg(cl_kernel , cl_uint , size_t , const void* );
-
 cl_int clEnqueueNDRangeKernel(cl_command_queue Queue,
                               cl_kernel Kernel,
                               cl_uint WorkDim,
@@ -208,7 +222,8 @@ cl_int clEnqueueNDRangeKernel(cl_command_queue Queue,
 	for (size_t Idx = 0; Idx < WorkDim; Idx++)
 		NumOfThread *= GlobalWorkSize[Idx];
 
-	std::unique_ptr<int[]> Header = std::make_unique<int[]>(NumOfThread);
+	// cl_int, i.e. signed 2's complement 32-bit integer, shall suffice
+	std::vector<cl_int> Header(NumOfThread, 1);
 
 	clMemObj DevHeader(clCreateBuffer(Context, CL_MEM_READ_WRITE,
 	                   sizeof(int) * NumOfThread, nullptr, &Ret));
@@ -226,10 +241,8 @@ cl_int clEnqueueNDRangeKernel(cl_command_queue Queue,
 
 	cl_ulong Threshold = CLPKM::getRuntimeKeeper().getCRThreshold();
 
-	std::fill(&Header[0], &Header[NumOfThread], 1);
-
 	if ((Ret = clEnqueueWriteBuffer(Queue, DevHeader.get(), CL_TRUE, 0,
-	                                sizeof(int) * NumOfThread, Header.get(),
+	                                sizeof(cl_int) * NumOfThread, Header.data(),
 	                                0, nullptr, nullptr)) != CL_SUCCESS)
 		return Ret;
 
@@ -246,11 +259,11 @@ cl_int clEnqueueNDRangeKernel(cl_command_queue Queue,
 
 	auto YetFinished = [&](cl_int* Return) -> bool {
 		*Return = clEnqueueReadBuffer(Queue, DevHeader.get(), CL_TRUE, 0,
-		                               sizeof(int) * NumOfThread, Header.get(),
-		                               0, nullptr, nullptr);
+		                              sizeof(cl_int) * NumOfThread,
+		                              Header.data(), 0, nullptr, nullptr);
 		return (*Return == CL_SUCCESS) &&
-		        std::find_if(&Header[0], &Header[NumOfThread],
-		        [](int Val) -> bool { return Val != 0; }) != &Header[NumOfThread];
+		       std::any_of(Header.begin(), Header.end(),
+		                   [](int V) { return V != 0; });
 		};
 
 	// Main loop
