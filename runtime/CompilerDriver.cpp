@@ -84,7 +84,7 @@ bool CLPKM::Compile(std::string& Source, const char* Options, ProfileList& PL) {
 	if (Pid == -1)
 		return Cleanup();
 
-	// Invoke the compiler
+	// Child: invoke the compiler
 	if (Pid == 0) {
 
 		std::string ErrorMsg;
@@ -107,6 +107,7 @@ bool CLPKM::Compile(std::string& Source, const char* Options, ProfileList& PL) {
 
 		}
 
+	// Parent continues here
 	if (!(CloseFd(SrcPipe[0]) && CloseFd(OutPipe[1]) && CloseFd(YamlPipe[1])))
 		return Cleanup();
 
@@ -138,9 +139,12 @@ bool CLPKM::Compile(std::string& Source, const char* Options, ProfileList& PL) {
 
 	if (waitpid(Pid, &ChildStatus, 0) == -1 || WEXITSTATUS(ChildStatus) != 0) {
 		Source = Yaml;
+		Pid = 0;
 		Cleanup(true);
 		return false;
 		}
+
+	Pid = 0;
 
 	// YAML-CPP throws exception on error
 	try {
