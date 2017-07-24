@@ -15,6 +15,7 @@ COMMENT
 # Tool path configuration
 CLPKMCC=$(realpath ~/CLPKM/cc/clpkmcc)
 export LD_LIBRARY_PATH=$(realpath ~/llvm-4.0.1-dbg/lib)
+TOOLKIT=$(realpath ~/CLPKM/toolkit.cl)
 
 # Temp files
 TMPBASE=/tmp/clpkm_drv_"$BASHPID"_"$RANDOM"
@@ -28,7 +29,8 @@ CCLOG="$TMPBASE".log
 cat > "$ORIGINAL"
 
 # Invoke CLPKMCC
-"$CLPKMCC" "$ORIGINAL" --source-output="$INSTRED" --profile-output="$PROFLIST" \
+"$CLPKMCC" "$TOOLKIT" "$ORIGINAL" \
+  --source-output="$INSTRED" --profile-output="$PROFLIST" \
   -- -include clc/clc.h -std=cl1.2 $@ \
   1> /dev/null 2> "$CCLOG"
 

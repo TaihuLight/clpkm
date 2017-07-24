@@ -148,8 +148,12 @@ bool CLPKM::Compile(std::string& Source, const char* Options, ProfileList& PL) {
 
 	// Locate YAML beginning
 	// The loader might emit something like "no version information available"
-	if (size_t StartPos = Yaml.find("---\n"); StartPos != std::string::npos)
-		Yaml = Yaml.substr(StartPos);
+	if (size_t StartPos = Yaml.find("---"); StartPos != std::string::npos)
+		Yaml.erase(0, StartPos);
+
+	// Locate YAML end
+	if (size_t EndPos = Yaml.find("\n..."); EndPos != std::string::npos)
+		Yaml.erase(EndPos + 4);
 
 	// YAML-CPP throws exception on error
 	try {
