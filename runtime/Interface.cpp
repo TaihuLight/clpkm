@@ -87,7 +87,7 @@ cl_int clBuildProgram(cl_program Program,
 		return Ret;
 
 	// Must be greater than zero because the size includes null terminator
-	assert(SourceLength > 0);
+	assert(SourceLength > 0 && "clGetProgramInfo returned zero source length");
 
 	// If the program is created via clCreateProgramWithBinary or is a built-in
 	// kernel, it returns a null string

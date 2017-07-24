@@ -1,78 +1,44 @@
 #!/bin/bash
 
-if [ ! "$#" -eq 2 ]; then
-	echo 'Usage:'
-	echo "'$0' <cl_file> <out_file>"
-	exit
+: << COMMENT
+CLPKM compiler driver
+====================
+
+Introduction
+--------------------
+-   The source is read from stdin
+-   Instrumented code will be emitted to stdout
+-   Kernel profile in YAML will be emitted to stderr
+
+COMMENT
+
+# Tool path configuration
+CLPKMCC=$(realpath ~/CLPKM/cc/clpkmcc)
+export LD_LIBRARY_PATH=$(realpath ~/llvm-4.0.1-dbg/lib)
+
+# Temp files
+TMPBASE=/tmp/clpkm_drv_"$BASHPID"_"$RANDOM"
+ORIGINAL="$TMPBASE"_original.cl
+INSTRED="$TMPBASE"_instr.cl
+PROFLIST="$TMPBASE"_profile.yaml
+CCLOG="$TMPBASE".log
+
+
+# Read source code from stdin
+cat > "$ORIGINAL"
+
+# Invoke CLPKMCC
+"$CLPKMCC" "$ORIGINAL" --source-output="$INSTRED" --profile-output="$PROFLIST" \
+  -- -include clc/clc.h -std=cl1.2 $@ \
+  1> /dev/null 2> "$CCLOG"
+
+# Failed
+if [ ! "$?" -eq 0 ]; then
+  cat "$CCLOG" 1>&2
+# Succeed
+else
+  cat "$INSTRED"
+  cat "$PROFLIST" 1>&2
 fi
 
-EXE=$(realpath "$0")
-DIR=$(dirname "$EXE")
-OUT="${2%%.cl}"
-
-LLVM_CONFIG=~/llvm-4.0.1-dbg/bin/llvm-config
-CXX=~/llvm-4.0.1/bin/clang++
-INC="-I $HOME/libclc/generic/include -include clc/clc.h"
-
-if ! make -C "$DIR" CXX="$CXX" LLVM_CONFIG="$LLVM_CONFIG" -j 8; then
-	echo 'Failed to make'
-	exit
-fi
-
-export LD_LIBRARY_PATH="$HOME"/llvm-4.0.1-dbg/lib
-set -x
-
-# Check user provided file before proceed
-if ! "$CXX" -fsyntax-only $INC "$1"; then
-	echo '===================='
-	echo 'Illegal OpenCL source'
-	echo '===================='
-	exit
-fi
-
-# PP
-if ! "$DIR"/clpkmpp "$1" -- $INC > "$OUT"_pp.cl; then
-	echo '===================='
-	echo 'PP failed'
-	echo '===================='
-	exit
-fi
-
-if ! "$CXX" -fsyntax-only $INC "$OUT"_pp.cl; then
-	echo '===================='
-	echo "PP gen'd invalid output"
-	echo '===================='
-	exit
-fi
-
-# Inliner
-if ! "$DIR"/clinliner "$OUT"_pp.cl -- $INC > "$OUT"_inline.cl ; then
-	echo '===================='
-	echo 'Inliner failed'
-	echo '===================='
-	rm -f "$TEMP"
-	exit
-fi
-
-if ! "$CXX" -fsyntax-only $INC "$OUT"_inline.cl; then
-	echo '===================='
-	echo "inliner gen'd invalid output"
-	echo '===================='
-	exit
-fi
-
-# CC
-if ! "$DIR"/clpkmcc "$OUT"_inline.cl -- $INC > "$OUT"_cc.cl; then
-	echo '===================='
-	echo 'CC failed'
-	echo '===================='
-	rm -f "$TEMP"
-	exit
-fi
-
-if ! "$CXX" -fsyntax-only $INC "$OUT"_cc.cl; then
-	echo '===================='
-	echo "CC gen'd invalid output"
-	echo '===================='
-	exit
-fi
+rm -f "$ORIGINAL" "$INSTRED" "$PROFLIST" "$CCLOG"

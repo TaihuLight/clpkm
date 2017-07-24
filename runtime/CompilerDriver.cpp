@@ -146,6 +146,11 @@ bool CLPKM::Compile(std::string& Source, const char* Options, ProfileList& PL) {
 
 	Pid = 0;
 
+	// Locate YAML beginning
+	// The loader might emit something like "no version information available"
+	if (size_t StartPos = Yaml.find("---\n"); StartPos != std::string::npos)
+		Yaml = Yaml.substr(StartPos);
+
 	// YAML-CPP throws exception on error
 	try {
 		YAML::Node KP = YAML::Load(Yaml);
