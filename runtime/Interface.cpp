@@ -226,7 +226,7 @@ cl_int clEnqueueNDRangeKernel(cl_command_queue Queue,
 	std::vector<cl_int> Header(NumOfThread, 1);
 
 	clMemObj DevHeader(clCreateBuffer(Context, CL_MEM_READ_WRITE,
-	                   sizeof(int) * NumOfThread, nullptr, &Ret));
+	                   sizeof(cl_int) * NumOfThread, nullptr, &Ret));
 
 	if (Ret != CL_SUCCESS)
 		return Ret;
@@ -234,7 +234,7 @@ cl_int clEnqueueNDRangeKernel(cl_command_queue Queue,
 	cl_mem DevLocal = NULL;
 
 	clMemObj DevPrv(clCreateBuffer(Context, CL_MEM_READ_WRITE,
-	                Profile.ReqPrvSize, nullptr, &Ret));
+	                Profile.ReqPrvSize * NumOfThread, nullptr, &Ret));
 
 	if (Ret != CL_SUCCESS)
 		return Ret;
