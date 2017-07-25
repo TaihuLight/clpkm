@@ -276,4 +276,42 @@ cl_int clEnqueueNDRangeKernel(cl_command_queue Queue,
 
 	}
 
+cl_int clReleaseKernel(cl_kernel Kernel) {
+
+	auto& KT = CLPKM::getRuntimeKeeper().getKernelTable();
+	auto It = KT.find(Kernel);
+
+	if (It == KT.end())
+		return CL_INVALID_KERNEL;
+
+	KT.erase(It);
+
+	static auto Impl = reinterpret_cast<decltype(&clReleaseKernel)>(
+	                   		dlsym(RTLD_NEXT, "clReleaseKernel"));
+
+	return Impl(Kernel);
+
+	}
+
+cl_int clReleaseProgram(cl_program Program) {
+
+	static auto Impl = reinterpret_cast<decltype(&clReleaseProgram)>(
+	                   		dlsym(RTLD_NEXT, "clReleaseProgram"));
+
+	auto& PT = CLPKM::getRuntimeKeeper().getProgramTable();
+	auto It = PT.find(Program);
+
+	// Release shadow program
+	if (It != PT.end()) {
+		if (It->second.ShadowProgram != NULL) {
+			auto Ret = Impl(It->second.ShadowProgram);
+			assert(Ret == CL_SUCCESS && "clReleaseProgram failed on shadow program");
+			}
+		PT.erase(It);
+		}
+
+	return Impl(Program);
+
+	}
+
 }
