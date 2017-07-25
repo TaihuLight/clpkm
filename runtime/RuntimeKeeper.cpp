@@ -31,7 +31,7 @@ struct InitFromFile : public CLPKM::RuntimeKeeper::InitHelper {
 			// TODO: work with daemon via UNIX domain socket or so
 			if (Config["compiler"])
 				RT.setCompilerPath(Config["compiler"].as<std::string>());
-			if (Config["thresold"])
+			if (Config["threshold"])
 				RT.setCRThreshold(Config["threshold"].as<CLPKM::tlv_t>());
 			}
 		catch (...) {
