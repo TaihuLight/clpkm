@@ -239,7 +239,7 @@ cl_int clEnqueueNDRangeKernel(cl_command_queue Queue,
 	if (Ret != CL_SUCCESS)
 		return Ret;
 
-	cl_ulong Threshold = CLPKM::getRuntimeKeeper().getCRThreshold();
+	cl_uint Threshold = CLPKM::getRuntimeKeeper().getCRThreshold();
 
 	if ((Ret = clEnqueueWriteBuffer(Queue, DevHeader.get(), CL_TRUE, 0,
 	                                sizeof(cl_int) * NumOfThread, Header.data(),
@@ -251,7 +251,7 @@ cl_int clEnqueueNDRangeKernel(cl_command_queue Queue,
 	if ((Ret = clSetKernelArg(Kernel, Idx++, sizeof(cl_mem), &DevHeader.get())) != CL_SUCCESS ||
 	    (Ret = clSetKernelArg(Kernel, Idx++, sizeof(cl_mem), &DevLocal)) != CL_SUCCESS ||
 	    (Ret = clSetKernelArg(Kernel, Idx++, sizeof(cl_mem), &DevPrv.get())) != CL_SUCCESS ||
-	    (Ret = clSetKernelArg(Kernel, Idx++, sizeof(cl_ulong), &Threshold)) != CL_SUCCESS)
+	    (Ret = clSetKernelArg(Kernel, Idx++, sizeof(cl_uint), &Threshold)) != CL_SUCCESS)
 		return Ret;
 
 	static auto Impl = reinterpret_cast<decltype(&clEnqueueNDRangeKernel)>(

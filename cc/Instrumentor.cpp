@@ -143,7 +143,7 @@ bool Instrumentor::TraverseFunctionDecl(FunctionDecl* FuncDecl) {
 	const char* CLPKMParam = ", __global int * __clpkm_hdr, "
 	                         "__global char * __clpkm_local, "
 	                         "__global char * __clpkm_prv, "
-	                         "__const ulong __clpkm_tlv";
+	                         "__const uint __clpkm_tlv";
 
 	TheRewriter.InsertTextAfterToken(InsertCut, CLPKMParam);
 
@@ -173,7 +173,7 @@ bool Instrumentor::TraverseFunctionDecl(FunctionDecl* FuncDecl) {
 	TheRewriter.InsertTextAfterToken(
 		FuncDecl->getBody()->getLocStart(),
 		"\n  size_t __clpkm_id = __get_global_linear_id();\n"
-		"  size_t __clpkm_ctr = 0;\n"
+		"  uint __clpkm_ctr = 0;\n"
 		"  __clpkm_prv += __clpkm_id * " + std::string(ReqPrvSizeVar) + ";\n"
 		"  switch (__clpkm_hdr[__clpkm_id]) {\n"
 		"  default:  return;\n"

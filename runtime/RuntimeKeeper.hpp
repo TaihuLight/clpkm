@@ -35,7 +35,7 @@ struct KernelInfo {
 
 using ProgramTable = std::unordered_map<cl_program, ProgramInfo>;
 using KernelTable = std::unordered_map<cl_kernel, KernelInfo>;
-using tlv_t = uint64_t;
+using tlv_t = cl_uint;
 
 
 
