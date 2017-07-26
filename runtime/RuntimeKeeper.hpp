@@ -42,13 +42,6 @@ using tlv_t = cl_uint;
 // Main class
 class RuntimeKeeper {
 public:
-	ProgramTable& getProgramTable() { return PT; }
-	KernelTable&  getKernelTable() { return KT; }
-	const std::string& getCompilerPath() { return CompilerPath; }
-	tlv_t getCRThreshold() { return Threshold; }
-
-	void setCRThreshold(tlv_t T) { Threshold = T; }
-	void setCompilerPath(std::string&& Path) { CompilerPath = std::move(Path); }
 
 	enum state_t {
 		SUCCEED = 0,
@@ -57,9 +50,27 @@ public:
 		NUM_OF_STATE
 	};
 
-	struct InitHelper {
+	enum priority {
+		HIGH = 0,
+		LOW,
+		NUM_OF_PRIORITY
+		};
+
+	state_t getState() { return State; }
+	priority getPriority() { return Priority; }
+
+	ProgramTable& getProgramTable() { return PT; }
+	KernelTable&  getKernelTable() { return KT; }
+	const std::string& getCompilerPath() { return CompilerPath; }
+	tlv_t getCRThreshold() { return Threshold; }
+
+	void setPriority(priority P) { Priority = P; }
+	void setCompilerPath(std::string&& Path) { CompilerPath = std::move(Path); }
+	void setCRThreshold(tlv_t T) { Threshold = T; }
+
+	struct ConfigLoader {
 		virtual state_t operator()(RuntimeKeeper& ) = 0;
-		virtual ~InitHelper() { }
+		virtual ~ConfigLoader() { }
 		};
 
 private:
@@ -72,11 +83,12 @@ private:
 	: State(SUCCEED), PT(), KT(), CompilerPath("/usr/bin/clpkm.sh"),
 	  Threshold(1000000) { }
 
-	RuntimeKeeper(InitHelper& Init)
-	: RuntimeKeeper() { State = Init(*this); }
+	RuntimeKeeper(ConfigLoader& CL)
+	: RuntimeKeeper() { State = CL(*this); }
 
 	// Internal status
-	state_t State;
+	state_t  State;
+	priority Priority;
 
 	// Members
 	// OpenCL related stuff
@@ -89,7 +101,7 @@ private:
 
 	// Wa-i! Sugo-i! Tanoshi-!
 	friend RuntimeKeeper& getRuntimeKeeper(void);
-	friend class InitHelper;
+	friend class ConfigLoader;
 
 	};
 

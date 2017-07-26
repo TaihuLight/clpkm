@@ -77,6 +77,7 @@ cl_int clBuildProgram(cl_program Program,
                       void (*Notify)(cl_program, void* ),
                       void* UserData) {
 
+	// FIXME: we can't handle clBuildProgram on the same program twice atm
 	std::string Source;
 	size_t SourceLength = 0;
 

@@ -16,7 +16,7 @@
 
 namespace {
 
-struct InitFromFile : public CLPKM::RuntimeKeeper::InitHelper {
+struct InitFromFile : public CLPKM::RuntimeKeeper::ConfigLoader {
 	CLPKM::RuntimeKeeper::state_t operator()(CLPKM::RuntimeKeeper& RT) override {
 		// yaml-cpp throws exception on error
 		try {

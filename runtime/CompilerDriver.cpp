@@ -99,7 +99,8 @@ bool CLPKM::Compile(std::string& Source, const char* Options, ProfileList& PL) {
 			ErrorMsg = StrError(errno);
 		// It won't return unless something went south
 		else if (execlp(CLPKM::getRuntimeKeeper().getCompilerPath().c_str(),
-		         Options, NULL) == -1)
+		                CLPKM::getRuntimeKeeper().getCompilerPath().c_str(),
+		                Options, NULL) == -1)
 			ErrorMsg = StrError(errno);
 
 		FullWrite(STDERR_FILENO, ErrorMsg.data(), ErrorMsg.size());
@@ -148,7 +149,7 @@ bool CLPKM::Compile(std::string& Source, const char* Options, ProfileList& PL) {
 
 	// Locate YAML beginning
 	// The loader might emit something like "no version information available"
-	if (size_t StartPos = Yaml.find("---"); StartPos != std::string::npos)
+	if (size_t StartPos = Yaml.find("---\n"); StartPos != std::string::npos)
 		Yaml.erase(0, StartPos);
 
 	// Locate YAML end
