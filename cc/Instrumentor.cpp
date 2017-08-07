@@ -7,8 +7,35 @@
 
 #include "Instrumentor.hpp"
 #include <string>
+#include <vector>
 
 using namespace clang;
+
+
+
+namespace {
+// Helper class to collect info of variables located in local memory
+class LocalDeclVisitor : public RecursiveASTVisitor<LocalDeclVisitor> {
+public:
+	LocalDeclVisitor(std::vector<VarDecl*>& LD)
+	: LocDecl(LD) { }
+
+	bool VisitDeclStmt(DeclStmt* DS) {
+		if (DS == nullptr)
+			return true;
+		VarDecl* VD = dyn_cast_or_null<VarDecl>(DS->getSingleDecl());
+		if (VD == nullptr)
+			return true;
+		QualType QT = VD->getType();
+		if (QT.getAddressSpace() == LangAS::opencl_local)
+			LocDecl.emplace_back(VD);
+		return true;
+		}
+
+private:
+	std::vector<VarDecl*>& LocDecl;
+	};
+}
 
 
 
@@ -203,7 +230,7 @@ bool Instrumentor::TraverseFunctionDecl(FunctionDecl* FuncDecl) {
 	}
 
 bool Instrumentor::PatchLoopBody(size_t OldCost, size_t NewCost,
-                   Stmt* Loop, Expr* Cond, Stmt* Body) {
+                                 Stmt* Loop, Expr* Cond, Stmt* Body) {
 
 	CostCounter = OldCost;
 

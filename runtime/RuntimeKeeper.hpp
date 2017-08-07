@@ -33,8 +33,16 @@ struct KernelInfo {
 	KernelInfo() : Profile(nullptr) { }
 	};
 
+struct EventLog {
+	cl_ulong Queued;
+	cl_ulong Sumit;
+	cl_ulong Start;
+	cl_ulong End;
+	};
+
 using ProgramTable = std::unordered_map<cl_program, ProgramInfo>;
 using KernelTable = std::unordered_map<cl_kernel, KernelInfo>;
+using EventLogger = std::unordered_map<cl_event, EventLog>;
 using tlv_t = cl_uint;
 
 
@@ -61,6 +69,7 @@ public:
 
 	ProgramTable& getProgramTable() { return PT; }
 	KernelTable&  getKernelTable() { return KT; }
+	EventLogger&  getEventLogger() { return EL; }
 	const std::string& getCompilerPath() { return CompilerPath; }
 	tlv_t getCRThreshold() { return Threshold; }
 
@@ -80,7 +89,7 @@ private:
 	// Internal functions
 	// Default parameters
 	RuntimeKeeper()
-	: State(SUCCEED), PT(), KT(), CompilerPath("/usr/bin/clpkm.sh"),
+	: State(SUCCEED), PT(), KT(), EL(), CompilerPath("/usr/bin/clpkm.sh"),
 	  Threshold(1000000) { }
 
 	RuntimeKeeper(ConfigLoader& CL)
@@ -94,6 +103,7 @@ private:
 	// OpenCL related stuff
 	ProgramTable PT;
 	KernelTable  KT;
+	EventLogger  EL;
 
 	// Config stuff
 	std::string CompilerPath;

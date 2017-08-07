@@ -9,6 +9,7 @@
 
 #include "RuntimeKeeper.hpp"
 #include <cstdlib>
+#include <cstring>
 #include <sys/types.h>
 #include <pwd.h>
 
@@ -16,7 +17,7 @@
 
 namespace {
 
-struct InitFromFile : public CLPKM::RuntimeKeeper::ConfigLoader {
+struct DefaultLoader : public CLPKM::RuntimeKeeper::ConfigLoader {
 	CLPKM::RuntimeKeeper::state_t operator()(CLPKM::RuntimeKeeper& RT) override {
 		// yaml-cpp throws exception on error
 		try {
@@ -33,6 +34,10 @@ struct InitFromFile : public CLPKM::RuntimeKeeper::ConfigLoader {
 				RT.setCompilerPath(Config["compiler"].as<std::string>());
 			if (Config["threshold"])
 				RT.setCRThreshold(Config["threshold"].as<CLPKM::tlv_t>());
+			// Override if specified from environment variable
+			if (const char* Fine = getenv("CLPKM_PRIORITY"); Fine != nullptr)
+				if (strcmp(Fine, "high") == 0)
+					RT.setPriority(CLPKM::RuntimeKeeper::priority::HIGH);
 			}
 		catch (...) {
 			return CLPKM::RuntimeKeeper::INVALID_CONFIG;
@@ -47,7 +52,7 @@ struct InitFromFile : public CLPKM::RuntimeKeeper::ConfigLoader {
 
 // Customize initializer here if needed
 CLPKM::RuntimeKeeper& CLPKM::getRuntimeKeeper(void) {
-	InitFromFile Initializer;
-	static RuntimeKeeper RT(Initializer);
+	DefaultLoader Loader;
+	static RuntimeKeeper RT(Loader);
 	return RT;
 	}

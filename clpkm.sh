@@ -14,8 +14,9 @@ COMMENT
 
 # Tool path configuration
 CLPKMCC=$(realpath ~/CLPKM/cc/clpkmcc)
-export LD_LIBRARY_PATH=$(realpath ~/llvm-4.0.1-dbg/lib)
+CLINLINER=$(realpath ~/CLPKM/inliner/clinliner)
 TOOLKIT=$(realpath ~/CLPKM/toolkit.cl)
+export LD_LIBRARY_PATH=$(realpath ~/llvm-4.0.1-dbg/lib)
 
 # Temp files
 TMPBASE=/tmp/clpkm_drv_"$BASHPID"_"$RANDOM"
