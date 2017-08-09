@@ -215,7 +215,7 @@ cl_int clEnqueueNDRangeKernel(cl_command_queue Queue,
 	if (Ret != CL_SUCCESS)
 		return Ret;
 
-	if (WorkDim < 1)
+	if (WorkDim < 1 || WorkDim > 3)
 		return CL_INVALID_WORK_DIMENSION;
 
 	size_t NumOfThread = 1;
@@ -234,8 +234,11 @@ cl_int clEnqueueNDRangeKernel(cl_command_queue Queue,
 
 	cl_mem DevLocal = NULL;
 
-	clMemObj DevPrv(clCreateBuffer(Context, CL_MEM_READ_WRITE,
-	                Profile.ReqPrvSize * NumOfThread, nullptr, &Ret));
+	clMemObj DevPrv(Profile.ReqPrvSize > 0
+	                ? clCreateBuffer(Context, CL_MEM_READ_WRITE,
+	                                 Profile.ReqPrvSize * NumOfThread,
+	                                 nullptr, &Ret)
+	                : NULL);
 
 	if (Ret != CL_SUCCESS)
 		return Ret;

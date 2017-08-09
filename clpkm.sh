@@ -30,7 +30,7 @@ CCLOG="$TMPBASE".log
 cat > "$ORIGINAL"
 
 # Invoke CLPKMCC
-"$CLPKMCC" "$TOOLKIT" "$ORIGINAL" \
+"$CLPKMCC" "$ORIGINAL" \
   --source-output="$INSTRED" --profile-output="$PROFLIST" \
   -- -include clc/clc.h -std=cl1.2 $@ \
   1> /dev/null 2> "$CCLOG"
@@ -38,9 +38,10 @@ cat > "$ORIGINAL"
 # Failed
 if [ ! "$?" -eq 0 ]; then
   cat "$CCLOG" 1>&2
+  exit 1
 # Succeed
 else
-  cat "$INSTRED"
+  cat "$TOOLKIT" "$INSTRED"
   cat "$PROFLIST" 1>&2
 fi
 

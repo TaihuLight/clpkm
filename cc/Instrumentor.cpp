@@ -146,10 +146,6 @@ bool Instrumentor::TraverseFunctionDecl(FunctionDecl* FuncDecl) {
 	std::string ReqPrvSizeVar = "__clpkm_req_prv_size_"
 			+ FuncDecl->getNameInfo().getName().getAsString();
 
-	// Forward declaration max requested size, we don't know the answer atm
-	TheRewriter.InsertTextBefore(FuncDecl->getLocStart(),
-		"extern __constant size_t " + ReqPrvSizeVar + ";\n");
-
 	unsigned NumOfParam = FuncDecl->getNumParams();
 
 	// FIXME: I can't figure out a graceful way to do this at the moment
@@ -221,7 +217,7 @@ bool Instrumentor::TraverseFunctionDecl(FunctionDecl* FuncDecl) {
 	LVT.EndContext();
 
 	// Emit max requested size
-	TheRewriter.InsertTextAfterToken(FuncDecl->getLocEnd(),
+	TheRewriter.InsertTextBefore(FuncDecl->getLocStart(),
 		"\n__constant size_t " + ReqPrvSizeVar + " = "
 		+ std::to_string(ThePL.back().ReqPrvSize)+";");
 
