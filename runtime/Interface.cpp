@@ -9,13 +9,13 @@
 
 #include "CompilerDriver.hpp"
 #include "KernelProfile.hpp"
+#include "LookupVendorImpl.hpp"
 #include "RuntimeKeeper.hpp"
 
 #include <cstring>
 #include <string>
 #include <vector>
 
-#include <dlfcn.h>
 #include <CL/opencl.h>
 
 
@@ -62,8 +62,7 @@ cl_int clGetProgramBuildInfo(cl_program Program, cl_device_id Device,
 			}
 		}
 
-	static auto Impl = reinterpret_cast<decltype(&clGetProgramBuildInfo)>(
-	                   		dlsym(RTLD_NEXT, "clGetProgramBuildInfo"));
+	auto Impl = CLPKM::Lookup<CLPKM::OclAPI::clGetProgramBuildInfo>();
 
 	return Impl(Program, Device, ParamName,
 	            ParamValSize, ParamVal, ParamValSizeRet);
@@ -140,8 +139,7 @@ cl_int clBuildProgram(cl_program Program,
 	Entry.ShadowProgram = ShadowProgram;
 	Entry.KernelProfileList = std::move(PL);
 
-	static auto Impl = reinterpret_cast<decltype(&clBuildProgram)>(
-	                dlsym(RTLD_NEXT, "clBuildProgram"));
+	auto Impl = CLPKM::Lookup<CLPKM::OclAPI::clBuildProgram>();
 
 	// Call the vendor's impl to build the instrumented code
 	Ret = Impl(ShadowProgram, NumOfDevice, DeviceList,
@@ -179,8 +177,8 @@ cl_kernel clCreateKernel(cl_program Program, const char* Name, cl_int* Ret) {
 		return NULL;
 		}
 
-	static auto Impl = reinterpret_cast<decltype(&clCreateKernel)>(
-	                   		dlsym(RTLD_NEXT, "clCreateKernel"));
+	auto Impl = CLPKM::Lookup<CLPKM::OclAPI::clCreateKernel>();
+
 	cl_kernel Kernel = Impl(It->second.ShadowProgram, Name, Ret);
 
 	if (Kernel != NULL)
@@ -258,8 +256,7 @@ cl_int clEnqueueNDRangeKernel(cl_command_queue Queue,
 	    (Ret = clSetKernelArg(Kernel, Idx++, sizeof(cl_uint), &Threshold)) != CL_SUCCESS)
 		return Ret;
 
-	static auto Impl = reinterpret_cast<decltype(&clEnqueueNDRangeKernel)>(
-	                   		dlsym(RTLD_NEXT, "clEnqueueNDRangeKernel"));
+	auto Impl = CLPKM::Lookup<CLPKM::OclAPI::clEnqueueNDRangeKernel>();
 
 	auto YetFinished = [&](cl_int* Return) -> bool {
 		*Return = clEnqueueReadBuffer(Queue, DevHeader.get(), CL_TRUE, 0,
@@ -290,8 +287,7 @@ cl_int clReleaseKernel(cl_kernel Kernel) {
 
 	KT.erase(It);
 
-	static auto Impl = reinterpret_cast<decltype(&clReleaseKernel)>(
-	                   		dlsym(RTLD_NEXT, "clReleaseKernel"));
+	auto Impl = CLPKM::Lookup<CLPKM::OclAPI::clReleaseKernel>();
 
 	return Impl(Kernel);
 
@@ -299,8 +295,7 @@ cl_int clReleaseKernel(cl_kernel Kernel) {
 
 cl_int clReleaseProgram(cl_program Program) {
 
-	static auto Impl = reinterpret_cast<decltype(&clReleaseProgram)>(
-	                   		dlsym(RTLD_NEXT, "clReleaseProgram"));
+	auto Impl = CLPKM::Lookup<CLPKM::OclAPI::clReleaseProgram>();
 
 	auto& PT = CLPKM::getRuntimeKeeper().getProgramTable();
 	auto It = PT.find(Program);

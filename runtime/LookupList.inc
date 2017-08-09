@@ -1,0 +1,7 @@
+CLPKM_LOOKUP(clBuildProgram)
+CLPKM_LOOKUP(clCreateKernel)
+CLPKM_LOOKUP(clEnqueueNDRangeKernel)
+CLPKM_LOOKUP(clGetProgramBuildInfo)
+CLPKM_LOOKUP(clGetProgramInfo)
+CLPKM_LOOKUP(clReleaseKernel)
+CLPKM_LOOKUP(clReleaseProgram)

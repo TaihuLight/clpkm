@@ -23,20 +23,29 @@ namespace OclAPI {
 	#undef CLPKM_LOOKUP
 	}
 
+// Helper class to get the return function pointer type from the OclAPI classes
 template <class __api_type>
-void* Lookup(void) {
-	// This function should only be called and instantiated when the requested
-	// function is not listed in LookupList.inc
+struct __ret_type {
+	// This base class should only be instantiated when the requested function
+	// is not listed in LookupList.inc
 	// The compiler may decide to instantiate this function anyway and therefore
 	// trigger unwanted assertion failure
 	// The std::is_same here is to avoid such case
-	static_assert(std::is_same<__api_type, __api_type>::value,
+	static_assert(!std::is_same<__api_type, __api_type>::value,
 	              "lookup an function that is absent from LookupList.inc");
-	return nullptr;
-	}
+	};
+
+// Base
+template <class __api_type>
+typename __ret_type<__api_type>::value Lookup(void) { }
 
 #define CLPKM_LOOKUP(__api_name) \
-template <> decltype(&__api_name) Lookup<OclAPI::__api_name>(void);
+template <> struct __ret_type<::CLPKM::OclAPI::__api_name> { \
+	using value = decltype(&::__api_name); \
+	}; \
+template <> typename __ret_type<::CLPKM::OclAPI::__api_name>::value \
+Lookup<::CLPKM::OclAPI::__api_name>(void);
+#include "LookupList.inc"
 #undef CLPKM_LOOKUP
 
 }
