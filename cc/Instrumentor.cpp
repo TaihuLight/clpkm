@@ -60,8 +60,9 @@ bool Instrumentor::VisitReturnStmt(ReturnStmt* RS) {
 	if (RS != nullptr) {
 
 		// PP should have added braces for return statements
-		TheRewriter.InsertTextBefore(RS->getLocStart(),
-		                             "__clpkm_hdr[__clpkm_id] = 0;");
+		TheRewriter.ReplaceText({RS->getLocStart(), RS->getLocEnd()},
+		                        " __clpkm_hdr[__clpkm_id] = 0;"
+		                        " goto " + ExitLabel);
 
 		}
 
@@ -163,9 +164,9 @@ bool Instrumentor::TraverseFunctionDecl(FunctionDecl* FuncDecl) {
 	// Append arguments
 	auto LastParam = FuncDecl->getParamDecl(NumOfParam - 1);
 	auto InsertCut = LastParam->getSourceRange().getEnd();
-	const char* CLPKMParam = ", __global int * __clpkm_hdr, "
-	                         "__global char * __clpkm_local, "
-	                         "__global char * __clpkm_prv, "
+	const char* CLPKMParam = ", __global int * restrict __clpkm_hdr, "
+	                         "__global char * restrict __clpkm_local, "
+	                         "__global char * restrict __clpkm_prv, "
 	                         "__const uint __clpkm_tlv";
 
 	TheRewriter.InsertTextAfterToken(InsertCut, CLPKMParam);
@@ -202,8 +203,13 @@ bool Instrumentor::TraverseFunctionDecl(FunctionDecl* FuncDecl) {
 		"  default:  return;\n"
 		"  case 1: ;\n");
 
+	ExitLabel = "__CLPKM_SV_LOC_AND_RET";
+
 	TheRewriter.InsertTextBefore(FuncDecl->getBody()->getLocEnd(),
-	                             "\n  }\n  __clpkm_hdr[__clpkm_id] = 0;\n");
+	                             " } // switch\n"
+	                             " __clpkm_hdr[__clpkm_id] = 0;\n" +
+	                             ExitLabel + ": ;\n"
+	                             /* TODO: store local */);
 
 	// Preparation for traversal
 	LVT.SetContext(FuncDecl);
@@ -214,6 +220,7 @@ bool Instrumentor::TraverseFunctionDecl(FunctionDecl* FuncDecl) {
 	bool Ret = RecursiveASTVisitor<Instrumentor>::TraverseFunctionDecl(FuncDecl);
 
 	// Cleanup
+	ExitLabel.clear();
 	LVT.EndContext();
 
 	// Emit max requested size
@@ -250,11 +257,10 @@ bool Instrumentor::PatchLoopBody(size_t OldCost, size_t NewCost,
 	std::string ThisNonce = std::to_string(++Nonce);
 	std::string InstCR =
 			" __clpkm_ctr += " + std::to_string(NewCost - OldCost) + ";"
-			" case " + ThisNonce + ":"
 			" if (__clpkm_ctr > __clpkm_tlv) {"
-				"  __clpkm_hdr[__clpkm_id] = " + ThisNonce + "; " +
-				std::move(C.first) + " return;"
-			" } else if (__clpkm_ctr <= 0) { " +
+				" __clpkm_hdr[__clpkm_id] = " + ThisNonce + "; " +
+				std::move(C.first) + " goto " + ExitLabel + ";"
+			" } if (0) case " + ThisNonce + ": {" +
 				std::move(C.second) + " } ";
 
 	if (isa<CompoundStmt>(Body))

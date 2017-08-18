@@ -76,6 +76,9 @@ private:
 	size_t CostCounter;
 	size_t Nonce;
 
+	// Instrumentation related info
+	std::string ExitLabel;
+
 	};
 
 
