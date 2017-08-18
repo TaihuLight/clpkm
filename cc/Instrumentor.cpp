@@ -144,8 +144,9 @@ bool Instrumentor::TraverseFunctionDecl(FunctionDecl* FuncDecl) {
 	if (FuncDecl == nullptr || !FuncDecl->hasAttr<OpenCLKernelAttr>())
 		return true;
 
-	std::string ReqPrvSizeVar = "__clpkm_req_prv_size_"
-			+ FuncDecl->getNameInfo().getName().getAsString();
+	std::string FuncName = FuncDecl->getNameInfo().getName().getAsString();
+	std::string ReqPrvSizeVar = "__clpkm_req_prv_size_" + FuncName;
+	std::string ReqLocSizeVar = "__clpkm_req_loc_size_" + FuncName;
 
 	unsigned NumOfParam = FuncDecl->getNumParams();
 
@@ -176,7 +177,7 @@ bool Instrumentor::TraverseFunctionDecl(FunctionDecl* FuncDecl) {
 		return true;
 
 	// Put a new entry into the kernel profile list
-	ThePL.emplace_back(FuncDecl->getNameInfo().getName().getAsString(), NumOfParam);
+	auto& PLEntry = ThePL.emplace_back(FuncName, NumOfParam);
 
 	// Collect info of kernel parameters that point to local memory
 	// The size of these buffers are not deterministic here
@@ -185,7 +186,7 @@ bool Instrumentor::TraverseFunctionDecl(FunctionDecl* FuncDecl) {
 		if (QualType QT = PVD->getType(); QT->isPointerType()) {
 			if (QualType PointeeQT = QT->getPointeeType();
 			    PointeeQT.getAddressSpace() == LangAS::opencl_local)
-				ThePL.back().LocPtrParamIdx.emplace_back(ParamIdx);
+				PLEntry.LocPtrParamIdx.emplace_back(ParamIdx);
 //			QualType PointeeQT = QT->getPointeeType();
 //			llvm::errs() << "---> "<< PointeeQT.getAsString() << ' '
 //			             << PVD->getIdentifier()->getNameStart() << '\n';
@@ -196,7 +197,9 @@ bool Instrumentor::TraverseFunctionDecl(FunctionDecl* FuncDecl) {
 	// Inject main control flow
 	TheRewriter.InsertTextAfterToken(
 		FuncDecl->getBody()->getLocStart(),
-		"\n  size_t __clpkm_id = __get_global_linear_id();\n"
+		"\n  size_t __clpkm_id = 0;\n"
+		"  size_t __clpkm_grp_id = 0;\n"
+		"  __get_linear_id(&__clpkm_id, &__clpkm_grp_id);\n"
 		"  uint __clpkm_ctr = 0;\n"
 		"  __clpkm_prv += __clpkm_id * " + std::string(ReqPrvSizeVar) + ";\n"
 		"  switch (__clpkm_hdr[__clpkm_id]) {\n"
@@ -224,9 +227,13 @@ bool Instrumentor::TraverseFunctionDecl(FunctionDecl* FuncDecl) {
 	LVT.EndContext();
 
 	// Emit max requested size
-	TheRewriter.InsertTextBefore(FuncDecl->getLocStart(),
-		"\n__constant size_t " + ReqPrvSizeVar + " = "
-		+ std::to_string(ThePL.back().ReqPrvSize)+";");
+	std::string ReqSizeDeclStr =
+			"\n__constant size_t " + ReqPrvSizeVar + " = " +
+				std::to_string(PLEntry.ReqPrvSize) + ";"
+			"\n__constant size_t " + ReqLocSizeVar + " = " +
+				std::to_string(PLEntry.ReqLocSize) + ";";
+
+	TheRewriter.InsertTextBefore(FuncDecl->getLocStart(), ReqSizeDeclStr);
 
 	return Ret;
 

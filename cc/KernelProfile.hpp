@@ -31,6 +31,9 @@ struct KernelProfile {
 	: Name(std::move(N)), NumOfParam(NP), ReqPrvSize(0), ReqLocSize(0),
 	  LocPtrParamIdx() { }
 
+	KernelProfile(const std::string& N, unsigned NP)
+	: KernelProfile(std::string(N), NP) { }
+
 	struct Key {
 		static inline char Name[] = "kernel";
 		static inline char NumOfParam[] = "num-of-param";
