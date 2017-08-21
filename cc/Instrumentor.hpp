@@ -8,6 +8,7 @@
 #ifndef __CLPKM__INSTRUMENTOR_HPP__
 #define __CLPKM__INSTRUMENTOR_HPP__
 
+#include "Covfefe.hpp"
 #include "KernelProfile.hpp"
 #include "LiveVarTracker.hpp"
 
@@ -37,6 +38,7 @@ public:
 	bool VisitReturnStmt(clang::ReturnStmt* );
 
 	// Collect VarDecl to compute liveness
+	bool VisitDeclStmt(clang::DeclStmt* );
 	bool VisitVarDecl(clang::VarDecl* );
 
 	// Patch barrier
@@ -63,10 +65,6 @@ private:
 	bool PatchLoopBody(size_t OldCost, size_t NewCost, clang::Stmt* Loop,
 	                   clang::Expr* Cond, clang::Stmt* Body);
 
-	// Covfefe = checkpoint/resume code to inject
-	using Covfefe = std::pair<std::string, std::string>;
-	Covfefe GenerateCovfefe(clang::Stmt* );
-
 	clang::Rewriter&         TheRewriter;
 	clang::CompilerInstance& TheCI;
 	ProfileList&             ThePL;
@@ -75,9 +73,6 @@ private:
 
 	size_t CostCounter;
 	size_t Nonce;
-
-	// Instrumentation related info
-	std::string ExitLabel;
 
 	};
 

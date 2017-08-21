@@ -21,9 +21,9 @@ public:
 	: LocDecl(LD) { }
 
 	bool VisitDeclStmt(DeclStmt* DS) {
-		if (DS == nullptr)
+		if (DS == nullptr || DS->getDeclGroup().isNull())
 			return true;
-		VarDecl* VD = dyn_cast_or_null<VarDecl>(DS->getSingleDecl());
+		VarDecl* VD = dyn_cast_or_null<VarDecl>(*DS->decl_begin());
 		if (VD == nullptr)
 			return true;
 		QualType QT = VD->getType();
@@ -50,6 +50,7 @@ bool Instrumentor::VisitSwitchStmt(SwitchStmt* SS) {
 
 bool Instrumentor::VisitStmt(Stmt* S) {
 
+	// TODO: fine-grained cost evaluation
 	CostCounter++;
 	return true;
 
@@ -60,9 +61,10 @@ bool Instrumentor::VisitReturnStmt(ReturnStmt* RS) {
 	if (RS != nullptr) {
 
 		// PP should have added braces for return statements
+		// Note: The range involves not the semicolon
 		TheRewriter.ReplaceText({RS->getLocStart(), RS->getLocEnd()},
-		                        " __clpkm_hdr[__clpkm_id] = 0;"
-		                        " goto " + ExitLabel);
+		                        " do { __clpkm_hdr[__clpkm_id] = 0;"
+		                        " goto __CLPKM_SV_LOC_AND_RET; } while(0)");
 
 		}
 
@@ -70,16 +72,23 @@ bool Instrumentor::VisitReturnStmt(ReturnStmt* RS) {
 
 	}
 
+// Remove variable declaration located at local memory
+bool Instrumentor::VisitDeclStmt(DeclStmt* DS) {
+		if (DS == nullptr || DS->getDeclGroup().isNull())
+			return true;
+		VarDecl* VD = dyn_cast_or_null<VarDecl>(*DS->decl_begin());
+		if (VD == nullptr)
+			return true;
+		QualType QT = VD->getType();
+		if (QT.getAddressSpace() == LangAS::opencl_local)
+			TheRewriter.RemoveText({DS->getLocStart(), DS->getLocEnd()});
+		return true;
+		}
+
 bool Instrumentor::VisitVarDecl(VarDecl* VD) {
 
 	if (VD != nullptr)
 		LVT.AddTrack(VD);
-
-	QualType QT = VD->getType();
-	TypeInfo TI = VD->getASTContext().getTypeInfo(QT);
-
-	if (QT.getAddressSpace() == LangAS::opencl_local)
-		ThePL.back().ReqLocSize += (TI.Width + 7) / 8;
 
 	return true;
 
@@ -194,6 +203,16 @@ bool Instrumentor::TraverseFunctionDecl(FunctionDecl* FuncDecl) {
 		++ParamIdx;
 		}
 
+	std::vector<VarDecl*> LocDecl;
+
+	// Collect local decl
+	{
+		LocalDeclVisitor V(LocDecl);
+		V.VisitFunctionDecl(FuncDecl);
+		}
+
+	auto Locfefe = GenerateLocfefe(LocDecl, FuncDecl, PLEntry);
+
 	// Inject main control flow
 	TheRewriter.InsertTextAfterToken(
 		FuncDecl->getBody()->getLocStart(),
@@ -203,15 +222,13 @@ bool Instrumentor::TraverseFunctionDecl(FunctionDecl* FuncDecl) {
 		"  uint __clpkm_ctr = 0;\n"
 		"  __clpkm_prv += __clpkm_id * " + std::string(ReqPrvSizeVar) + ";\n"
 		"  switch (__clpkm_hdr[__clpkm_id]) {\n"
-		"  default:  return;\n"
+		"  default: goto __CLPKM_SV_LOC_AND_RET;\n"
 		"  case 1: ;\n");
-
-	ExitLabel = "__CLPKM_SV_LOC_AND_RET";
 
 	TheRewriter.InsertTextBefore(FuncDecl->getBody()->getLocEnd(),
 	                             " } // switch\n"
-	                             " __clpkm_hdr[__clpkm_id] = 0;\n" +
-	                             ExitLabel + ": ;\n"
+	                             " __clpkm_hdr[__clpkm_id] = 0;\n"
+	                             " __CLPKM_SV_LOC_AND_RET: ;\n"
 	                             /* TODO: store local */);
 
 	// Preparation for traversal
@@ -223,7 +240,6 @@ bool Instrumentor::TraverseFunctionDecl(FunctionDecl* FuncDecl) {
 	bool Ret = RecursiveASTVisitor<Instrumentor>::TraverseFunctionDecl(FuncDecl);
 
 	// Cleanup
-	ExitLabel.clear();
 	LVT.EndContext();
 
 	// Emit max requested size
@@ -260,13 +276,13 @@ bool Instrumentor::PatchLoopBody(size_t OldCost, size_t NewCost,
 
 		}
 
-	Covfefe C = GenerateCovfefe(Body);
+	Covfefe C = GenerateCovfefe(LVT.GenLivenessAfter(Body), ThePL.back());
 	std::string ThisNonce = std::to_string(++Nonce);
 	std::string InstCR =
 			" __clpkm_ctr += " + std::to_string(NewCost - OldCost) + ";"
 			" if (__clpkm_ctr > __clpkm_tlv) {"
 				" __clpkm_hdr[__clpkm_id] = " + ThisNonce + "; " +
-				std::move(C.first) + " goto " + ExitLabel + ";"
+				std::move(C.first) + " goto __CLPKM_SV_LOC_AND_RET;"
 			" } if (0) case " + ThisNonce + ": {" +
 				std::move(C.second) + " } ";
 
@@ -281,61 +297,5 @@ bool Instrumentor::PatchLoopBody(size_t OldCost, size_t NewCost,
 		}
 
 	return true;
-
-	}
-
-auto Instrumentor::GenerateCovfefe(Stmt* S) -> Covfefe {
-
-	// The first is for checkpoint, and the second is for resume
-	Covfefe C;
-	size_t ReqPrvSize = 0;
-
-	for (VarDecl* VD : this->LVT.GenLivenessAfter(S)) {
-
-		QualType QT = VD->getType();
-		TypeInfo TI = VD->getASTContext().getTypeInfo(QT);
-
-		switch (QT.getAddressSpace()) {
-		// No need to store global stuff
-		case LangAS::opencl_global:
-		case LangAS::opencl_constant:
-			break;
-
-		case LangAS::opencl_local:
-			// TODO
-			break;
-
-		// clang::LangAS::Default, IIUC, private
-		case 0:
-			// New scope to deal with bypassing initialization
-			{
-				const char* VarName = VD->getIdentifier()->getNameStart();
-				size_t Size = (TI.Width + 7) / 8;
-
-				std::string P = "(__clpkm_prv+" +
-				                std::to_string(ReqPrvSize) +
-				                ", &" + std::string(VarName) + ", " +
-				                std::to_string(Size) + "); ";
-				C.first += "__clpkm_store_private";
-				C.first += P;
-				C.second += "__clpkm_load_private";
-				C.second += std::move(P);
-				ReqPrvSize += Size;
-
-				}
-			break;
-
-		default:
-			llvm_unreachable("Unexpected address space :(");
-
-			}
-
-		}
-
-	// Update max requested size
-	size_t OldReqSize = ThePL.back().ReqPrvSize;
-	ThePL.back().ReqPrvSize = std::max(OldReqSize, ReqPrvSize);
-
-	return C;
 
 	}
