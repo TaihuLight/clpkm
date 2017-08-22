@@ -80,8 +80,9 @@ private:
 
 	// Locfefe is the counterpart of local memory
 	using Locfefe = std::pair<std::string, std::string>;
-	static Locfefe GenerateLocfefe(std::vector<clang::VarDecl*>& ,
-	                               clang::FunctionDecl* , KernelProfile& );
+	static Locfefe GenerateLocfefe(std::vector<clang::DeclStmt*>& ,
+	                               clang::Rewriter& , clang::FunctionDecl* ,
+	                               KernelProfile& );
 
 	};
 

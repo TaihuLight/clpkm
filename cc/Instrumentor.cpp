@@ -17,7 +17,7 @@ namespace {
 // Helper class to collect info of variables located in local memory
 class LocalDeclVisitor : public RecursiveASTVisitor<LocalDeclVisitor> {
 public:
-	LocalDeclVisitor(std::vector<VarDecl*>& LD)
+	LocalDeclVisitor(std::vector<DeclStmt*>& LD)
 	: LocDecl(LD) { }
 
 	bool VisitDeclStmt(DeclStmt* DS) {
@@ -28,12 +28,12 @@ public:
 			return true;
 		QualType QT = VD->getType();
 		if (QT.getAddressSpace() == LangAS::opencl_local)
-			LocDecl.emplace_back(VD);
+			LocDecl.emplace_back(DS);
 		return true;
 		}
 
 private:
-	std::vector<VarDecl*>& LocDecl;
+	std::vector<DeclStmt*>& LocDecl;
 	};
 }
 
@@ -203,24 +203,29 @@ bool Instrumentor::TraverseFunctionDecl(FunctionDecl* FuncDecl) {
 		++ParamIdx;
 		}
 
-	std::vector<VarDecl*> LocDecl;
+	std::vector<DeclStmt*> LocDecl;
 
 	// Collect local decl
 	{
 		LocalDeclVisitor V(LocDecl);
-		V.VisitFunctionDecl(FuncDecl);
+		V.TraverseFunctionDecl(FuncDecl);
 		}
 
-	auto Locfefe = GenerateLocfefe(LocDecl, FuncDecl, PLEntry);
+	auto Locfefe = GenerateLocfefe(LocDecl, TheRewriter, FuncDecl, PLEntry);
 
 	// Inject main control flow
 	TheRewriter.InsertTextAfterToken(
 		FuncDecl->getBody()->getLocStart(),
-		"\n  size_t __clpkm_id = 0;\n"
-		"  size_t __clpkm_grp_id = 0;\n"
-		"  __get_linear_id(&__clpkm_id, &__clpkm_grp_id);\n"
+		"\n  size_t __clpkm_id = 0; // work-item id \n"
+		"  size_t __clpkm_grp_id = 0; // work-group id \n"
 		"  uint __clpkm_ctr = 0;\n"
-		"  __clpkm_prv += __clpkm_id * " + std::string(ReqPrvSizeVar) + ";\n"
+		"  // Compute linear IDs and adjust live value buffer\n"
+		"  __get_linear_id(&__clpkm_id, &__clpkm_grp_id);\n"
+		"  __clpkm_prv += __clpkm_id * " + ReqPrvSizeVar + ";\n"
+		// TODO: runtime decide local memory size!
+		"  __clpkm_local += __clpkm_grp_id * " + ReqLocSizeVar + ";\n"
+		"  // Load live values for variables locate in local memory\n" +
+		std::move(Locfefe.second) +
 		"  switch (__clpkm_hdr[__clpkm_id]) {\n"
 		"  default: goto __CLPKM_SV_LOC_AND_RET;\n"
 		"  case 1: ;\n");
@@ -228,8 +233,8 @@ bool Instrumentor::TraverseFunctionDecl(FunctionDecl* FuncDecl) {
 	TheRewriter.InsertTextBefore(FuncDecl->getBody()->getLocEnd(),
 	                             " } // switch\n"
 	                             " __clpkm_hdr[__clpkm_id] = 0;\n"
-	                             " __CLPKM_SV_LOC_AND_RET: ;\n"
-	                             /* TODO: store local */);
+	                             " __CLPKM_SV_LOC_AND_RET: ;\n" +
+	                             std::move(Locfefe.first));
 
 	// Preparation for traversal
 	LVT.SetContext(FuncDecl);
@@ -340,6 +345,7 @@ auto Instrumentor::GenerateCovfefe(LiveVarTracker::liveness&& L,
 
 		default:
 			llvm_unreachable("Unexpected address space :(");
+
 			}
 
 		}
@@ -351,21 +357,73 @@ auto Instrumentor::GenerateCovfefe(LiveVarTracker::liveness&& L,
 
 	}
 
-auto Instrumentor::GenerateLocfefe(std::vector<VarDecl*>& LocDecl,
+auto Instrumentor::GenerateLocfefe(std::vector<DeclStmt*>& LocDecl, Rewriter& R,
                                    FunctionDecl* FD,
                                    KernelProfile& KP) -> Locfefe {
 
+	unsigned NumOfEvent = 0;
+	size_t   ReqLocSize = 0;
+
+	// {store, load}
 	Locfefe LC;
+	std::string Decl;
 
 	// Compile time evaluable
-	for (VarDecl* VD : LocDecl) {
-		
+	for (DeclStmt* DS : LocDecl) {
+
+		// Move forward declaration
+		Decl += R.getRewrittenText({DS->getLocStart(), DS->getLocEnd()});
+
+		for (auto It = DS->decl_begin(); It != DS->decl_end(); ++It) {
+
+			VarDecl* VD = dyn_cast_or_null<VarDecl>(*It);
+			QualType QT = VD->getType();
+			TypeInfo TI = VD->getASTContext().getTypeInfo(QT);
+			size_t Size = (TI.Width + 7) / 8;
+
+			std::string StrLocArg =
+					"(__local char*)&" +
+					std::string(VD->getIdentifier()->getNameStart());
+			std::string StrGblArg =
+					"__clpkm_local + " + std::to_string(ReqLocSize);
+			std::string StrSize = std::to_string(Size);
+
+			LC.first += "__clpkm_cp_ev = async_work_group_copy(" + StrGblArg +
+			            ", " + StrLocArg + ", " + StrSize + ", __clpkm_cp_ev); ";
+			LC.second += "__clpkm_cp_ev = async_work_group_copy(" +
+			             std::move(StrLocArg) + ", " + std::move(StrGblArg) +
+			             ", " + std::move(StrSize) + ", __clpkm_cp_ev); ";
+
+			++NumOfEvent;
+			ReqLocSize += Size;
+
+			}
 		}
+
+	KP.ReqLocSize += ReqLocSize;
 
 	// Runtime decide
 	for (unsigned ParamIdx : KP.LocPtrParamIdx) {
-		
+		// TODO
+		++NumOfEvent;
 		}
+
+	// Nothing to store
+	if (NumOfEvent == 0)
+		return Locfefe();
+
+	// Sync before store to live value buffer
+	LC.first = " barrier(CLK_LOCAL_MEM_FENCE);"
+	           " event_t __clpkm_cp_ev = 0; " +
+	           std::move(LC.first) +
+	           " wait_group_events(1, &__clpkm_cp_ev); ";
+
+	LC.second = std::move(Decl) +
+	            " if (__clpkm_hdr[__clpkm_id] != 1) { "
+	            "   event_t __clpkm_cp_ev = 0; " +
+	            std::move(LC.second) +
+	            "   wait_group_events(1, &__clpkm_cp_ev); "
+	            "   barrier(CLK_LOCAL_MEM_FENCE); } ";
 
 	return LC;
 
