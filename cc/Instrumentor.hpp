@@ -8,7 +8,6 @@
 #ifndef __CLPKM__INSTRUMENTOR_HPP__
 #define __CLPKM__INSTRUMENTOR_HPP__
 
-#include "Covfefe.hpp"
 #include "KernelProfile.hpp"
 #include "LiveVarTracker.hpp"
 
@@ -73,6 +72,16 @@ private:
 
 	size_t CostCounter;
 	size_t Nonce;
+
+	// A covfefe is a checkpoint/resume code sequence for variables located in
+	// private memory
+	using Covfefe = std::pair<std::string, std::string>;
+	static Covfefe GenerateCovfefe(LiveVarTracker::liveness&& , KernelProfile& );
+
+	// Locfefe is the counterpart of local memory
+	using Locfefe = std::pair<std::string, std::string>;
+	static Locfefe GenerateLocfefe(std::vector<clang::VarDecl*>& ,
+	                               clang::FunctionDecl* , KernelProfile& );
 
 	};
 
