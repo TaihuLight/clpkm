@@ -18,6 +18,8 @@
 
 #include <CL/opencl.h>
 
+using namespace CLPKM;
+
 
 
 namespace {
@@ -44,7 +46,7 @@ cl_int clGetProgramBuildInfo(cl_program Program, cl_device_id Device,
                              size_t ParamValSize, void* ParamVal,
                              size_t* ParamValSizeRet) {
 
-	auto& PT = CLPKM::getRuntimeKeeper().getProgramTable();
+	auto& PT = getRuntimeKeeper().getProgramTable();
 	auto It = PT.find(Program);
 
 	// Found
@@ -62,10 +64,8 @@ cl_int clGetProgramBuildInfo(cl_program Program, cl_device_id Device,
 			}
 		}
 
-	auto Impl = CLPKM::Lookup<CLPKM::OclAPI::clGetProgramBuildInfo>();
-
-	return Impl(Program, Device, ParamName,
-	            ParamValSize, ParamVal, ParamValSizeRet);
+	return Lookup<OclAPI::clGetProgramBuildInfo>()(
+			Program, Device, ParamName, ParamValSize, ParamVal, ParamValSizeRet);
 
 	}
 
@@ -80,8 +80,9 @@ cl_int clBuildProgram(cl_program Program,
 	std::string Source;
 	size_t SourceLength = 0;
 
-	cl_int Ret = clGetProgramInfo(Program, CL_PROGRAM_SOURCE, 0, nullptr,
-	                              &SourceLength);
+	auto venGetProgramInfo = Lookup<OclAPI::clGetProgramInfo>();
+	cl_int Ret = venGetProgramInfo(Program, CL_PROGRAM_SOURCE, 0, nullptr,
+	                               &SourceLength);
 
 	if (Ret != CL_SUCCESS)
 		return Ret;
@@ -97,8 +98,8 @@ cl_int clBuildProgram(cl_program Program,
 
 	// Retrieve the source to instrument and remove the null terminator
 	Source.resize(SourceLength, '\0');
-	Ret = clGetProgramInfo(Program, CL_PROGRAM_SOURCE, SourceLength,
-	                       Source.data(), nullptr);
+	Ret = venGetProgramInfo(Program, CL_PROGRAM_SOURCE, SourceLength,
+	                        Source.data(), nullptr);
 	Source.resize(SourceLength - 1);
 
 	if (Ret != CL_SUCCESS)
@@ -107,13 +108,13 @@ cl_int clBuildProgram(cl_program Program,
 	cl_context Context;
 
 	// Retrieve the context to build a new program
-	Ret = clGetProgramInfo(Program, CL_PROGRAM_CONTEXT, sizeof(Context),
-	                       &Context, nullptr);
+	Ret = venGetProgramInfo(Program, CL_PROGRAM_CONTEXT, sizeof(Context),
+	                        &Context, nullptr);
 
 	if (Ret != CL_SUCCESS)
 		return Ret;
 
-	auto& PT = CLPKM::getRuntimeKeeper().getProgramTable();
+	auto& PT = getRuntimeKeeper().getProgramTable();
 	ProfileList PL;
 
 	// Now invoke CLPKMCC
@@ -129,8 +130,8 @@ cl_int clBuildProgram(cl_program Program,
 	const size_t Len = Source.size();
 
 	// Build a new program with instrumented code
-	cl_program ShadowProgram = clCreateProgramWithSource(Context, 1, &Ptr, &Len,
-	                                                     &Ret);
+	cl_program ShadowProgram = Lookup<OclAPI::clCreateProgramWithSource>()(
+			Context, 1, &Ptr, &Len, &Ret);
 
 	if (Ret != CL_SUCCESS)
 		return Ret;
@@ -139,19 +140,15 @@ cl_int clBuildProgram(cl_program Program,
 	Entry.ShadowProgram = ShadowProgram;
 	Entry.KernelProfileList = std::move(PL);
 
-	auto Impl = CLPKM::Lookup<CLPKM::OclAPI::clBuildProgram>();
-
 	// Call the vendor's impl to build the instrumented code
-	Ret = Impl(ShadowProgram, NumOfDevice, DeviceList,
-	           Options, Notify, UserData);
-
-	return Ret;
+	return Lookup<OclAPI::clBuildProgram>()(
+			ShadowProgram, NumOfDevice, DeviceList, Options, Notify, UserData);
 
 	}
 
 cl_kernel clCreateKernel(cl_program Program, const char* Name, cl_int* Ret) {
 
-	auto& PT = CLPKM::getRuntimeKeeper().getProgramTable();
+	auto& PT = getRuntimeKeeper().getProgramTable();
 	auto It = PT.find(Program);
 
 	if (It == PT.end()) {
@@ -177,12 +174,11 @@ cl_kernel clCreateKernel(cl_program Program, const char* Name, cl_int* Ret) {
 		return NULL;
 		}
 
-	auto Impl = CLPKM::Lookup<CLPKM::OclAPI::clCreateKernel>();
-
-	cl_kernel Kernel = Impl(It->second.ShadowProgram, Name, Ret);
+	cl_kernel Kernel = Lookup<OclAPI::clCreateKernel>()(
+			It->second.ShadowProgram, Name, Ret);
 
 	if (Kernel != NULL)
-		CLPKM::getRuntimeKeeper().getKernelTable()[Kernel].Profile = &(*Pos);
+		getRuntimeKeeper().getKernelTable()[Kernel].Profile = &(*Pos);
 
 	return Kernel;
 
@@ -198,7 +194,7 @@ cl_int clEnqueueNDRangeKernel(cl_command_queue Queue,
                               const cl_event* WaitingList,
                               cl_event* Event) {
 
-	auto& KT = CLPKM::getRuntimeKeeper().getKernelTable();
+	auto& KT = getRuntimeKeeper().getKernelTable();
 	auto It = KT.find(Kernel);
 
 	if (It == KT.end())
@@ -207,13 +203,13 @@ cl_int clEnqueueNDRangeKernel(cl_command_queue Queue,
 	auto& Profile = *(It->second).Profile;
 	cl_context Context;
 
-	cl_int Ret = clGetKernelInfo(Kernel, CL_KERNEL_CONTEXT,
-	                             sizeof(Context), &Context, nullptr);
+	cl_int Ret = Lookup<OclAPI::clGetKernelInfo>()(
+			Kernel, CL_KERNEL_CONTEXT, sizeof(Context), &Context, nullptr);
 
 	if (Ret != CL_SUCCESS)
 		return Ret;
 
-	if (WorkDim < 1 || WorkDim > 3)
+	if (WorkDim < 1)
 		return CL_INVALID_WORK_DIMENSION;
 
 	size_t NumOfThread = 1;
@@ -221,47 +217,55 @@ cl_int clEnqueueNDRangeKernel(cl_command_queue Queue,
 	for (size_t Idx = 0; Idx < WorkDim; Idx++)
 		NumOfThread *= GlobalWorkSize[Idx];
 
+	auto venCreateBuffer = Lookup<OclAPI::clCreateBuffer>();
+
 	// cl_int, i.e. signed 2's complement 32-bit integer, shall suffice
 	std::vector<cl_int> Header(NumOfThread, 1);
 
-	clMemObj DevHeader(clCreateBuffer(Context, CL_MEM_READ_WRITE,
+	clMemObj DevHeader(venCreateBuffer(Context, CL_MEM_READ_WRITE,
 	                   sizeof(cl_int) * NumOfThread, nullptr, &Ret));
 
 	if (Ret != CL_SUCCESS)
 		return Ret;
 
+	// TODO
 	cl_mem DevLocal = NULL;
 
 	clMemObj DevPrv(Profile.ReqPrvSize > 0
-	                ? clCreateBuffer(Context, CL_MEM_READ_WRITE,
-	                                 Profile.ReqPrvSize * NumOfThread,
-	                                 nullptr, &Ret)
+	                ? venCreateBuffer(Context, CL_MEM_READ_WRITE,
+	                                  Profile.ReqPrvSize * NumOfThread,
+	                                  nullptr, &Ret)
 	                : NULL);
 
 	if (Ret != CL_SUCCESS)
 		return Ret;
 
-	cl_uint Threshold = CLPKM::getRuntimeKeeper().getCRThreshold();
+	cl_uint Threshold = getRuntimeKeeper().getCRThreshold();
 
-	if ((Ret = clEnqueueWriteBuffer(Queue, DevHeader.get(), CL_TRUE, 0,
-	                                sizeof(cl_int) * NumOfThread, Header.data(),
-	                                0, nullptr, nullptr)) != CL_SUCCESS)
+	auto venEnqWrBuf = Lookup<OclAPI::clEnqueueWriteBuffer>();
+	auto venEnqRdBuf = Lookup<OclAPI::clEnqueueReadBuffer>();
+
+	if ((Ret = venEnqWrBuf(Queue, DevHeader.get(), CL_TRUE, 0,
+	                       sizeof(cl_int) * NumOfThread, Header.data(),
+	                       0, nullptr, nullptr)) != CL_SUCCESS)
 		return Ret;
+
+	auto venSetKernelArg = Lookup<OclAPI::clSetKernelArg>();
 
 	// Set args
 	auto Idx = Profile.NumOfParam;
-	if ((Ret = clSetKernelArg(Kernel, Idx++, sizeof(cl_mem), &DevHeader.get())) != CL_SUCCESS ||
-	    (Ret = clSetKernelArg(Kernel, Idx++, sizeof(cl_mem), &DevLocal)) != CL_SUCCESS ||
-	    (Ret = clSetKernelArg(Kernel, Idx++, sizeof(cl_mem), &DevPrv.get())) != CL_SUCCESS ||
-	    (Ret = clSetKernelArg(Kernel, Idx++, sizeof(cl_uint), &Threshold)) != CL_SUCCESS)
+	if ((Ret = venSetKernelArg(Kernel, Idx++, sizeof(cl_mem), &DevHeader.get())) != CL_SUCCESS ||
+	    (Ret = venSetKernelArg(Kernel, Idx++, sizeof(cl_mem), &DevLocal)) != CL_SUCCESS ||
+	    (Ret = venSetKernelArg(Kernel, Idx++, sizeof(cl_mem), &DevPrv.get())) != CL_SUCCESS ||
+	    (Ret = venSetKernelArg(Kernel, Idx++, sizeof(cl_uint), &Threshold)) != CL_SUCCESS)
 		return Ret;
 
-	auto Impl = CLPKM::Lookup<CLPKM::OclAPI::clEnqueueNDRangeKernel>();
+	auto venEnqNDRKernel = Lookup<OclAPI::clEnqueueNDRangeKernel>();
 
 	auto YetFinished = [&](cl_int* Return) -> bool {
-		*Return = clEnqueueReadBuffer(Queue, DevHeader.get(), CL_TRUE, 0,
-		                              sizeof(cl_int) * NumOfThread,
-		                              Header.data(), 0, nullptr, nullptr);
+		*Return = venEnqRdBuf(Queue, DevHeader.get(), CL_TRUE, 0,
+		                      sizeof(cl_int) * NumOfThread,
+		                      Header.data(), 0, nullptr, nullptr);
 		return (*Return == CL_SUCCESS) &&
 		       std::any_of(Header.begin(), Header.end(),
 		                   [](int V) { return V != 0; });
@@ -269,8 +273,8 @@ cl_int clEnqueueNDRangeKernel(cl_command_queue Queue,
 
 	// Main loop
 	do {
-		Ret = Impl(Queue, Kernel, WorkDim, GlobalWorkOffset, GlobalWorkSize,
-	              LocalWorkSize, NumOfWaiting, WaitingList, Event);
+		Ret = venEnqNDRKernel(Queue, Kernel, WorkDim, GlobalWorkOffset,
+				GlobalWorkSize, LocalWorkSize, NumOfWaiting, WaitingList, Event);
 		} while (Ret == CL_SUCCESS && YetFinished(&Ret));
 
 	return Ret;
@@ -279,7 +283,7 @@ cl_int clEnqueueNDRangeKernel(cl_command_queue Queue,
 
 cl_int clReleaseKernel(cl_kernel Kernel) {
 
-	auto& KT = CLPKM::getRuntimeKeeper().getKernelTable();
+	auto& KT = getRuntimeKeeper().getKernelTable();
 	auto It = KT.find(Kernel);
 
 	if (It == KT.end())
@@ -287,29 +291,27 @@ cl_int clReleaseKernel(cl_kernel Kernel) {
 
 	KT.erase(It);
 
-	auto Impl = CLPKM::Lookup<CLPKM::OclAPI::clReleaseKernel>();
-
-	return Impl(Kernel);
+	return Lookup<OclAPI::clReleaseKernel>()(Kernel);
 
 	}
 
 cl_int clReleaseProgram(cl_program Program) {
 
-	auto Impl = CLPKM::Lookup<CLPKM::OclAPI::clReleaseProgram>();
+	auto venReleaseProgram = Lookup<OclAPI::clReleaseProgram>();
 
-	auto& PT = CLPKM::getRuntimeKeeper().getProgramTable();
+	auto& PT = getRuntimeKeeper().getProgramTable();
 	auto It = PT.find(Program);
 
 	// Release shadow program
 	if (It != PT.end()) {
 		if (It->second.ShadowProgram != NULL) {
-			auto Ret = Impl(It->second.ShadowProgram);
+			auto Ret = venReleaseProgram(It->second.ShadowProgram);
 			assert(Ret == CL_SUCCESS && "clReleaseProgram failed on shadow program");
 			}
 		PT.erase(It);
 		}
 
-	return Impl(Program);
+	return venReleaseProgram(Program);
 
 	}
 

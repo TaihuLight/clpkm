@@ -15,6 +15,8 @@
 
 
 
+namespace CLPKM {
+
 inline llvm::StringRef getStringRef(llvm::StringRef StrRef) noexcept {
 	return StrRef;
 	}
@@ -43,6 +45,8 @@ std::string Concat(T&& ... S) {
 
 	return Result;
 	}
+
+} // namespace
 
 
 
