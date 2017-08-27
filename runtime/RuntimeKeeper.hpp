@@ -84,7 +84,7 @@ public:
 
 	template <class ... T>
 	void Log(loglevel Level, T&& ... FormatStr) {
-		if (Level >= LogLevel)
+		if (LogLevel >= Level)
 			fprintf(stderr, FormatStr...);
 		}
 
