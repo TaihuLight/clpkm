@@ -203,6 +203,7 @@ cl_int clEnqueueNDRangeKernel(cl_command_queue Queue,
 	auto& Profile = *(It->second).Profile;
 	cl_context Context;
 
+	// Lookup for the context
 	cl_int Ret = Lookup<OclAPI::clGetKernelInfo>()(
 			Kernel, CL_KERNEL_CONTEXT, sizeof(Context), &Context, nullptr);
 
@@ -211,6 +212,21 @@ cl_int clEnqueueNDRangeKernel(cl_command_queue Queue,
 
 	if (WorkDim < 1)
 		return CL_INVALID_WORK_DIMENSION;
+
+	if (GlobalWorkSize == nullptr)
+		return CL_INVALID_GLOBAL_WORK_SIZE;
+
+	size_t NumOfWorkGrp = 1;
+
+	if (LocalWorkSize == nullptr)
+		throw std::runtime_error("Yet impl'd auto decide local work size");
+
+	// Compute total number of work groups
+	for (size_t Idx = 0; Idx < WorkDim; Idx++) {
+		if (GlobalWorkSize[Idx] % LocalWorkSize[Idx])
+			return CL_INVALID_WORK_GROUP_SIZE;
+		NumOfWorkGrp *= GlobalWorkSize[Idx] / LocalWorkSize[Idx];
+		}
 
 	size_t NumOfThread = 1;
 
@@ -228,8 +244,15 @@ cl_int clEnqueueNDRangeKernel(cl_command_queue Queue,
 	if (Ret != CL_SUCCESS)
 		return Ret;
 
-	// TODO
-	cl_mem DevLocal = NULL;
+	// TODO: runtime decided size
+	clMemObj DevLocal(Profile.ReqLocSize > 0
+	                  ? venCreateBuffer(Context, CL_MEM_READ_WRITE,
+	                                    Profile.ReqLocSize * NumOfWorkGrp,
+	                                    nullptr, &Ret)
+	                  : NULL);
+
+	if (Ret != CL_SUCCESS)
+		return Ret;
 
 	clMemObj DevPrv(Profile.ReqPrvSize > 0
 	                ? venCreateBuffer(Context, CL_MEM_READ_WRITE,
