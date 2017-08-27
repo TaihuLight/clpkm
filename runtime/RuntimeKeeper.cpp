@@ -18,30 +18,40 @@
 namespace {
 
 struct DefaultLoader : public CLPKM::RuntimeKeeper::ConfigLoader {
-	CLPKM::RuntimeKeeper::state_t operator()(CLPKM::RuntimeKeeper& RT) override {
+	CLPKM::RuntimeKeeper::state_t
+	operator()(CLPKM::RuntimeKeeper& RT) const override {
+		// Load global config from config file
 		// yaml-cpp throws exception on error
 		try {
-			std::string ConfigPath;
-			if (const char* Home = getenv("HOME"); Home != nullptr)
-				ConfigPath = Home;
-			else
-				// FIXME: this is not thread-safe
-				ConfigPath = getpwuid(getuid())->pw_dir;
-			ConfigPath += "/.clpkmrc";
+			std::string ConfigPath = []() -> std::string {
+				const char* Home = getenv("HOME");
+				if (Home == nullptr)
+					// FIXME: this is not thread-safe
+					Home = getpwuid(getuid())->pw_dir;
+				return std::string(Home) + "/.clpkmrc";
+				}();
 			YAML::Node Config = YAML::LoadFile(ConfigPath);
 			// TODO: work with daemon via UNIX domain socket or so
 			if (Config["compiler"])
-				RT.setCompilerPath(Config["compiler"].as<std::string>());
+				ConfigLoader::setCompilerPath(RT, Config["compiler"].as<std::string>());
 			if (Config["threshold"])
-				RT.setCRThreshold(Config["threshold"].as<CLPKM::tlv_t>());
-			// Override if specified from environment variable
-			if (const char* Fine = getenv("CLPKM_PRIORITY"); Fine != nullptr)
-				if (strcmp(Fine, "high") == 0)
-					RT.setPriority(CLPKM::RuntimeKeeper::priority::HIGH);
+				ConfigLoader::setCRThreshold(RT, Config["threshold"].as<CLPKM::tlv_t>());
 			}
 		catch (...) {
 			return CLPKM::RuntimeKeeper::INVALID_CONFIG;
 			}
+
+		// Override config if specified from environment variable
+		if (const char* Fine = getenv("CLPKM_PRIORITY"))
+			if (strcmp(Fine, "high") == 0)
+				ConfigLoader::setPriority(RT, CLPKM::RuntimeKeeper::priority::HIGH);
+		if (const char* LogLevel = getenv("CLPKM_LOGLEVEL")) {
+			if (strcmp(LogLevel, "error") == 0)
+				ConfigLoader::setLogLevel(RT, CLPKM::RuntimeKeeper::loglevel::ERROR);
+			else if (strcmp(LogLevel, "info") == 0)
+				ConfigLoader::setLogLevel(RT, CLPKM::RuntimeKeeper::loglevel::INFO);
+			}
+
 		return CLPKM::RuntimeKeeper::SUCCEED;
 		}
 	};

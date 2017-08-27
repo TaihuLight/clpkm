@@ -11,9 +11,12 @@
 
 
 #include "KernelProfile.hpp"
+
 #include <cstdint>
+#include <cstdio>
 #include <string>
 #include <unordered_map>
+
 #include <CL/opencl.h>
 
 
@@ -50,7 +53,6 @@ using tlv_t = cl_uint;
 // Main class
 class RuntimeKeeper {
 public:
-
 	enum state_t {
 		SUCCEED = 0,
 		INVALID_CONFIG,
@@ -64,6 +66,13 @@ public:
 		NUM_OF_PRIORITY
 		};
 
+	enum loglevel {
+		FATAL = 0,
+		ERROR,
+		INFO,
+		NUM_OF_LOGLEVEL
+		};
+
 	state_t getState() { return State; }
 	priority getPriority() { return Priority; }
 
@@ -73,13 +82,31 @@ public:
 	const std::string& getCompilerPath() { return CompilerPath; }
 	tlv_t getCRThreshold() { return Threshold; }
 
-	void setPriority(priority P) { Priority = P; }
-	void setCompilerPath(std::string&& Path) { CompilerPath = std::move(Path); }
-	void setCRThreshold(tlv_t T) { Threshold = T; }
+	template <class ... T>
+	void Log(loglevel Level, T&& ... FormatStr) {
+		if (Level >= LogLevel)
+			fprintf(stderr, FormatStr...);
+		}
 
-	struct ConfigLoader {
-		virtual state_t operator()(RuntimeKeeper& ) = 0;
+	class ConfigLoader {
+	protected:
+		static void setPriority(CLPKM::RuntimeKeeper& RT, priority P) {
+			RT.setPriority(P);
+			}
+		static void setLogLevel(CLPKM::RuntimeKeeper& RT, loglevel L) {
+			RT.setLogLevel(L);
+			}
+		static void setCompilerPath(CLPKM::RuntimeKeeper& RT, std::string&& Path) {
+			RT.setCompilerPath(std::move(Path));
+			}
+		static void setCRThreshold(CLPKM::RuntimeKeeper& RT, tlv_t T) {
+			RT.setCRThreshold(T);
+			}
+
+	public:
+		virtual state_t operator()(RuntimeKeeper& ) const = 0;
 		virtual ~ConfigLoader() { }
+
 		};
 
 private:
@@ -89,15 +116,21 @@ private:
 	// Internal functions
 	// Default parameters
 	RuntimeKeeper()
-	: State(SUCCEED), PT(), KT(), EL(), CompilerPath("/usr/bin/clpkm.sh"),
-	  Threshold(1000000) { }
+	: State(SUCCEED), Priority(LOW), LogLevel(FATAL), PT(), KT(), EL(),
+	  CompilerPath("/usr/bin/clpkm.sh"), Threshold(1000000) { }
 
-	RuntimeKeeper(ConfigLoader& CL)
+	RuntimeKeeper(const ConfigLoader& CL)
 	: RuntimeKeeper() { State = CL(*this); }
+
+	void setPriority(priority P) { Priority = P; }
+	void setLogLevel(loglevel L) { LogLevel = L; }
+	void setCompilerPath(std::string&& Path) { CompilerPath = std::move(Path); }
+	void setCRThreshold(tlv_t T) { Threshold = T; }
 
 	// Internal status
 	state_t  State;
 	priority Priority;
+	loglevel LogLevel;
 
 	// Members
 	// OpenCL related stuff
