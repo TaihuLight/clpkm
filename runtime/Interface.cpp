@@ -23,18 +23,57 @@ using namespace CLPKM;
 
 
 namespace {
-class clMemObj {
+
+// A special RAII guard tailored for OpenCL stuff
+template <class ResType, class FinType>
+class ResGuard {
 public:
-	clMemObj(cl_mem M)
-	: MemObj(M) { }
+	ResGuard(ResType R, FinType F)
+	: Resource(R), Finalize(F) { }
 
-	~clMemObj() { if (MemObj != NULL) clReleaseMemObject(MemObj); }
+	~ResGuard() { Release(); }
 
-	cl_mem& get(void) { return MemObj; }
+	void Release(void) {
+		if (Resource != NULL) {
+			Finalize(Resource);
+			Resource = NULL;
+			}
+		}
+
+	ResGuard() = delete;
+	ResGuard(const ResGuard& ) = delete;
+	ResGuard& operator=(const ResGuard& ) = delete;
+
+	ResGuard(ResGuard&& RHS) {
+		Resource = RHS.Resource;
+		RHS.Resource = NULL;
+		}
+
+	ResGuard& operator=(ResGuard&& RHS) {
+		Release();
+		Resource = RHS.Resource;
+		RHS.Resource = NULL;
+		}
+
+	ResType& get(void) { return Resource; }
 
 private:
-	cl_mem MemObj;
+	ResType Resource;
+	FinType Finalize;
+
 	};
+
+using clMemObj = ResGuard<cl_mem, decltype(&clReleaseMemObject)>;
+using clEvent = ResGuard<cl_event, decltype(&clReleaseEvent)>;
+
+inline clMemObj getMemObj(cl_mem MemObj) {
+	return clMemObj(MemObj, Lookup<OclAPI::clReleaseMemObject>());
+	}
+
+inline clEvent getEvent(cl_event Event) {
+	return clEvent(Event, Lookup<OclAPI::clReleaseEvent>());
+	}
+
 }
 
 
@@ -197,8 +236,19 @@ cl_int clEnqueueNDRangeKernel(cl_command_queue Queue,
 	auto& KT = getRuntimeKeeper().getKernelTable();
 	auto It = KT.find(Kernel);
 
+	// Step 0
+	// Pre-check
 	if (It == KT.end())
 		return CL_INVALID_KERNEL;
+
+	if (WorkDim < 1)
+		return CL_INVALID_WORK_DIMENSION;
+
+	if (GlobalWorkSize == nullptr)
+		return CL_INVALID_GLOBAL_WORK_SIZE;
+
+	if ((NumOfWaiting > 0 && !WaitingList) || (NumOfWaiting <= 0 && WaitingList))
+		return CL_INVALID_EVENT_WAIT_LIST;
 
 	auto& Profile = *(It->second).Profile;
 	cl_context Context;
@@ -210,70 +260,86 @@ cl_int clEnqueueNDRangeKernel(cl_command_queue Queue,
 	if (Ret != CL_SUCCESS)
 		return Ret;
 
-	if (WorkDim < 1)
-		return CL_INVALID_WORK_DIMENSION;
-
-	if (GlobalWorkSize == nullptr)
-		return CL_INVALID_GLOBAL_WORK_SIZE;
-
+	// Step 1
+	// Compute total number of work groups
 	size_t NumOfWorkGrp = 1;
 
 	if (LocalWorkSize == nullptr)
 		throw std::runtime_error("Yet impl'd auto decide local work size");
 
-	// Compute total number of work groups
 	for (size_t Idx = 0; Idx < WorkDim; Idx++) {
 		if (GlobalWorkSize[Idx] % LocalWorkSize[Idx])
 			return CL_INVALID_WORK_GROUP_SIZE;
 		NumOfWorkGrp *= GlobalWorkSize[Idx] / LocalWorkSize[Idx];
 		}
 
+	// Step 2
+	// Compute total number of work items
 	size_t NumOfThread = 1;
 
 	for (size_t Idx = 0; Idx < WorkDim; Idx++)
 		NumOfThread *= GlobalWorkSize[Idx];
 
+	// Step 3
+	// Prepare header and live value buffers
 	auto venCreateBuffer = Lookup<OclAPI::clCreateBuffer>();
 
-	// cl_int, i.e. signed 2's complement 32-bit integer, shall suffice
-	std::vector<cl_int> Header(NumOfThread, 1);
-
-	clMemObj DevHeader(venCreateBuffer(Context, CL_MEM_READ_WRITE,
-	                   sizeof(cl_int) * NumOfThread, nullptr, &Ret));
+	clMemObj DevHeader = getMemObj(
+			venCreateBuffer(Context, CL_MEM_READ_WRITE,
+			                sizeof(cl_int) * NumOfThread, nullptr, &Ret));
 
 	if (Ret != CL_SUCCESS)
 		return Ret;
 
 	// TODO: runtime decided size
-	clMemObj DevLocal(Profile.ReqLocSize > 0
-	                  ? venCreateBuffer(Context, CL_MEM_READ_WRITE,
-	                                    Profile.ReqLocSize * NumOfWorkGrp,
-	                                    nullptr, &Ret)
-	                  : NULL);
+	clMemObj DevLocal = getMemObj(
+			Profile.ReqLocSize > 0
+			? venCreateBuffer(Context, CL_MEM_READ_WRITE,
+			                  Profile.ReqLocSize * NumOfWorkGrp,
+			                  nullptr, &Ret)
+			: NULL);
 
 	if (Ret != CL_SUCCESS)
 		return Ret;
 
-	clMemObj DevPrv(Profile.ReqPrvSize > 0
-	                ? venCreateBuffer(Context, CL_MEM_READ_WRITE,
-	                                  Profile.ReqPrvSize * NumOfThread,
-	                                  nullptr, &Ret)
-	                : NULL);
+	clMemObj DevPrv = getMemObj(
+			Profile.ReqPrvSize > 0
+			? venCreateBuffer(Context, CL_MEM_READ_WRITE,
+			                  Profile.ReqPrvSize * NumOfThread,
+			                  nullptr, &Ret)
+			: NULL);
 
 	if (Ret != CL_SUCCESS)
 		return Ret;
 
-	cl_uint Threshold = getRuntimeKeeper().getCRThreshold();
-
+	// Step 4
+	// Initialize the header, creating a new waiting event list to include
+	// the initializing event
 	auto venEnqWrBuf = Lookup<OclAPI::clEnqueueWriteBuffer>();
-	auto venEnqRdBuf = Lookup<OclAPI::clEnqueueReadBuffer>();
 
+	// cl_int, i.e. signed 2's complement 32-bit integer, shall suffice
+	std::vector<cl_int> Header(NumOfThread, 1);
+
+	// Hold original waiting list, in addition to the event of writing header
+	std::vector<cl_event> NewWaitingList(NumOfWaiting + 1, NULL);
+	clEvent WriteHeaderEvent = getEvent(NULL);
+
+	if (NumOfWaiting > 0)
+		std::copy(WaitingList, WaitingList + NumOfWaiting, NewWaitingList.begin());
+
+	// Write Header and put the event to the end of NewWaitingList
 	if ((Ret = venEnqWrBuf(Queue, DevHeader.get(), CL_TRUE, 0,
 	                       sizeof(cl_int) * NumOfThread, Header.data(),
-	                       0, nullptr, nullptr)) != CL_SUCCESS)
+	                       0, nullptr, &WriteHeaderEvent.get()))
+	    != CL_SUCCESS)
 		return Ret;
 
+	NewWaitingList.back() = WriteHeaderEvent.get();
+
+	// Step 5
+	// Set up additional CLPKM-related kernel arguments
 	auto venSetKernelArg = Lookup<OclAPI::clSetKernelArg>();
+	cl_uint Threshold = getRuntimeKeeper().getCRThreshold();
 
 	// Set args
 	auto Idx = Profile.NumOfParam;
@@ -284,6 +350,7 @@ cl_int clEnqueueNDRangeKernel(cl_command_queue Queue,
 		return Ret;
 
 	auto venEnqNDRKernel = Lookup<OclAPI::clEnqueueNDRangeKernel>();
+	auto venEnqRdBuf = Lookup<OclAPI::clEnqueueReadBuffer>();
 
 	auto YetFinished = [&](cl_int* Return) -> bool {
 		*Return = venEnqRdBuf(Queue, DevHeader.get(), CL_TRUE, 0,
@@ -294,11 +361,40 @@ cl_int clEnqueueNDRangeKernel(cl_command_queue Queue,
 		                   [](int V) { return V != 0; });
 		};
 
+	// XXX: REWRITE START
+	// This event will be set if the kernel really finished
+	*Event = Lookup<OclAPI::clCreateUserEvent>()(Context, &Ret);
+
+	if (Ret != CL_SUCCESS)
+		return Ret;
+
+	clEvent SubEvent = getEvent(NULL);
+
+	// Step 6
+	// Initial run has a special form that takes waiting events into account
+	// Also, some impl lazily allocates the buffers and problems like out-of-res
+	// may not be reported earlier
+	// We can report such kind of problems in time here
+	Ret = venEnqNDRKernel(Queue, Kernel, WorkDim, GlobalWorkOffset,
+	                      GlobalWorkSize, LocalWorkSize, NewWaitingList.size(),
+	                      NewWaitingList.data(), &SubEvent.get());
+
+	if (Ret != CL_SUCCESS)
+		return Ret;
+
+	// Warning: release write header event will result in blyat
 	// Main loop
-	do {
+	while (YetFinished(&Ret)) {
+		// Clear former event
+		SubEvent.Release();
+		// Enqueue next run
 		Ret = venEnqNDRKernel(Queue, Kernel, WorkDim, GlobalWorkOffset,
-				GlobalWorkSize, LocalWorkSize, NumOfWaiting, WaitingList, Event);
-		} while (Ret == CL_SUCCESS && YetFinished(&Ret));
+		                      GlobalWorkSize, LocalWorkSize, 0, nullptr,
+		                      &SubEvent.get());
+		getRuntimeKeeper().Log(RuntimeKeeper::loglevel::INFO, "Sleep for 1s...\n");
+		sleep(1);
+		};
+	// XXX: REWRITE END
 
 	return Ret;
 
