@@ -12,6 +12,7 @@
 #include "LookupVendorImpl.hpp"
 #include "RuntimeKeeper.hpp"
 
+#include <cinttypes>
 #include <cstring>
 #include <string>
 #include <vector>
@@ -23,6 +24,28 @@ using namespace CLPKM;
 
 
 namespace {
+
+class __ocl_error {
+public:
+	__ocl_error(cl_int R)
+	: __error_code(R) { }
+
+	operator cl_int() const { return __error_code; }
+
+private:
+	cl_int __error_code;
+
+	};
+
+#define OCL_ASSERT(Status) \
+	do { \
+		if ((Status) != CL_SUCCESS) \
+			getRuntimeKeeper().Log( \
+					RuntimeKeeper::loglevel::ERROR, \
+					"\nCLPKM | %s:%d (%s) ret " \
+					PRId32 "\n", __FILE__, __LINE__, __func__, (Status)); \
+		throw __ocl_error((Status)); \
+		} while(0)
 
 // A special RAII guard tailored for OpenCL stuff
 template <class ResType, class FinType>
@@ -74,7 +97,78 @@ inline clEvent getEvent(cl_event Event) {
 	return clEvent(Event, Lookup<OclAPI::clReleaseEvent>());
 	}
 
-}
+std::vector<size_t> FindWorkGroupSize(cl_kernel Kernel, cl_device_id Device,
+                                      size_t WorkDim, size_t MaxDim,
+                                      const size_t* WorkSize,
+                                      cl_int* Ret) {
+
+	auto venGetDevInfo = Lookup<OclAPI::clGetDeviceInfo>();
+	std::vector<size_t> MaxThreadSize(MaxDim, 1);
+
+	// Find out max size on each dimension
+	*Ret = venGetDevInfo(Device, CL_DEVICE_MAX_WORK_ITEM_SIZES,
+	                     sizeof(size_t) * MaxDim, MaxThreadSize.data(),
+	                     nullptr);
+	OCL_ASSERT(*Ret);
+
+	// Find out max number of work items
+	size_t MaxNumOfThread = 0;
+	auto venGetKernelBlockInfo = Lookup<OclAPI::clGetKernelWorkGroupInfo>();
+
+	*Ret = venGetKernelBlockInfo(Kernel, Device, CL_KERNEL_WORK_GROUP_SIZE,
+	                             sizeof(size_t), &MaxNumOfThread, nullptr);
+	OCL_ASSERT(*Ret);
+
+	std::vector<std::vector<size_t>> Factor(WorkDim);
+
+	// Compute the factors of global work size on each dimension
+	for (size_t Dim = 0; Dim < WorkDim; ++Dim) {
+		for (size_t Num = 1, Quotient;
+		     Num <= (Quotient = WorkSize[Dim] / Num)
+		     && Num <= MaxThreadSize[Dim];
+		     ++Num) {
+			if (WorkSize[Dim] % Num)
+				continue;
+			Factor[Dim].emplace_back(Num);
+			if (Quotient != Num && Quotient <= MaxThreadSize[Dim])
+				Factor[Dim].emplace_back(Quotient);
+			}
+		}
+
+	// Each entry in the set stores an index to a factor in the factor table
+	std::vector<size_t> TrySet(WorkDim, 0);
+	std::vector<size_t> MaxSet(WorkDim, 0);
+	size_t MaxSize = 1;
+
+	auto NextTry = [&]() -> bool {
+		size_t Dim = 0;
+		while (Dim < WorkDim && TrySet[Dim] == Factor[Dim].size() - 1)
+			TrySet[Dim++] = 0;
+		if (Dim >= WorkDim)
+			return false;
+		++TrySet[Dim];
+		return true;
+		};
+
+	// Start from the second try
+	while (NextTry()) {
+		size_t ThisSize = 1;
+		for (size_t Dim = 0; Dim < WorkDim; ++Dim)
+			ThisSize *= Factor[Dim][TrySet[Dim]];
+		if (ThisSize > MaxSize && ThisSize < MaxNumOfThread) {
+			MaxSet = TrySet;
+			MaxSize = ThisSize;
+			}
+		}
+
+	for (size_t Dim = 0; Dim < WorkDim; ++Dim)
+		MaxSet[Dim] = Factor[Dim][MaxSet[Dim]];
+
+	return MaxSet;
+
+	}
+
+} // namespace
 
 
 
@@ -244,7 +338,9 @@ cl_int clEnqueueNDRangeKernel(cl_command_queue Queue,
 	if (WorkDim < 1)
 		return CL_INVALID_WORK_DIMENSION;
 
-	if (GlobalWorkSize == nullptr)
+	if (GlobalWorkSize == nullptr ||
+	    std::any_of(GlobalWorkSize, GlobalWorkSize + WorkDim,
+	    [](size_t Size) -> bool { return !Size; }))
 		return CL_INVALID_GLOBAL_WORK_SIZE;
 
 	if ((NumOfWaiting > 0 && !WaitingList) || (NumOfWaiting <= 0 && WaitingList))
