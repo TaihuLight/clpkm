@@ -39,12 +39,13 @@ private:
 
 #define OCL_ASSERT(Status) \
 	do { \
-		if ((Status) != CL_SUCCESS) \
+		if ((Status) != CL_SUCCESS) { \
 			getRuntimeKeeper().Log( \
 					RuntimeKeeper::loglevel::ERROR, \
-					"\nCLPKM | %s:%d (%s) ret " \
+					"\n==CLPKM== %s:%d (%s) ret " \
 					PRId32 "\n", __FILE__, __LINE__, __func__, (Status)); \
-		throw __ocl_error((Status)); \
+			throw __ocl_error((Status)); \
+			} \
 		} while(0)
 
 // A special RAII guard tailored for OpenCL stuff
@@ -163,6 +164,29 @@ std::vector<size_t> FindWorkGroupSize(cl_kernel Kernel, cl_device_id Device,
 
 	for (size_t Dim = 0; Dim < WorkDim; ++Dim)
 		MaxSet[Dim] = Factor[Dim][MaxSet[Dim]];
+
+	auto ToString = [](auto Start, auto End) -> std::string {
+		std::string S;
+		auto It = Start;
+		if (It != End)
+			S += std::to_string(*It++);
+		while (It != End) {
+			S.append(", ");
+			S.append(std::to_string(*It++));
+			}
+		return S;
+		};
+
+	getRuntimeKeeper().Log(RuntimeKeeper::loglevel::INFO,
+	                       "\n==CLPKM== auto decide local work size\n"
+	                       "==CLPKM==   kernel work-group size: %zu\n"
+	                       "==CLPKM==   device limit: (%s)\n"
+	                       "==CLPKM==   gws: (%s) lws: (%s)\n",
+	                       MaxNumOfThread,
+	                       ToString(MaxThreadSize.begin(),
+	                                MaxThreadSize.end()).c_str(),
+	                       ToString(WorkSize, WorkSize + WorkDim).c_str(),
+	                       ToString(MaxSet.begin(), MaxSet.end()).c_str());
 
 	return MaxSet;
 
@@ -325,9 +349,10 @@ cl_int clEnqueueNDRangeKernel(cl_command_queue Queue,
                               const size_t* LocalWorkSize,
                               cl_uint NumOfWaiting,
                               const cl_event* WaitingList,
-                              cl_event* Event) {
+                              cl_event* Event) try {
 
-	auto& KT = getRuntimeKeeper().getKernelTable();
+	auto& RT = getRuntimeKeeper();
+	auto& KT = RT.getKernelTable();
 	auto It = KT.find(Kernel);
 
 	// Step 0
@@ -335,7 +360,31 @@ cl_int clEnqueueNDRangeKernel(cl_command_queue Queue,
 	if (It == KT.end())
 		return CL_INVALID_KERNEL;
 
-	if (WorkDim < 1)
+	if ((NumOfWaiting > 0 && !WaitingList) || (NumOfWaiting <= 0 && WaitingList))
+		return CL_INVALID_EVENT_WAIT_LIST;
+
+	auto& Profile = *(It->second).Profile;
+	cl_context   Context;
+	cl_device_id Device;
+
+	// Lookup for the context
+	cl_int Ret = Lookup<OclAPI::clGetKernelInfo>()(
+			Kernel, CL_KERNEL_CONTEXT, sizeof(Context), &Context, nullptr);
+	OCL_ASSERT(Ret);
+
+	// Lookup for the device
+	Ret = Lookup<OclAPI::clGetCommandQueueInfo>()(
+			Queue, CL_QUEUE_DEVICE, sizeof(cl_device_id), &Device, nullptr);
+	OCL_ASSERT(Ret);
+
+	cl_uint MaxDim = 0;
+
+	Ret = Lookup<OclAPI::clGetDeviceInfo>()(
+			Device, CL_DEVICE_MAX_WORK_ITEM_DIMENSIONS, sizeof(cl_uint),
+			&MaxDim, nullptr);
+	OCL_ASSERT(Ret);
+
+	if (WorkDim < 1 || WorkDim > MaxDim)
 		return CL_INVALID_WORK_DIMENSION;
 
 	if (GlobalWorkSize == nullptr ||
@@ -343,25 +392,16 @@ cl_int clEnqueueNDRangeKernel(cl_command_queue Queue,
 	    [](size_t Size) -> bool { return !Size; }))
 		return CL_INVALID_GLOBAL_WORK_SIZE;
 
-	if ((NumOfWaiting > 0 && !WaitingList) || (NumOfWaiting <= 0 && WaitingList))
-		return CL_INVALID_EVENT_WAIT_LIST;
-
-	auto& Profile = *(It->second).Profile;
-	cl_context Context;
-
-	// Lookup for the context
-	cl_int Ret = Lookup<OclAPI::clGetKernelInfo>()(
-			Kernel, CL_KERNEL_CONTEXT, sizeof(Context), &Context, nullptr);
-
-	if (Ret != CL_SUCCESS)
-		return Ret;
-
 	// Step 1
 	// Compute total number of work groups
 	size_t NumOfWorkGrp = 1;
+	std::vector<size_t> NewLocalWorkSize =
+			(LocalWorkSize == nullptr)
+			? FindWorkGroupSize(Kernel, Device, WorkDim, MaxDim, GlobalWorkSize, &Ret)
+			: std::vector<size_t>();
 
 	if (LocalWorkSize == nullptr)
-		throw std::runtime_error("Yet impl'd auto decide local work size");
+		LocalWorkSize = NewLocalWorkSize.data();
 
 	for (size_t Idx = 0; Idx < WorkDim; Idx++) {
 		if (GlobalWorkSize[Idx] % LocalWorkSize[Idx])
@@ -435,7 +475,7 @@ cl_int clEnqueueNDRangeKernel(cl_command_queue Queue,
 	// Step 5
 	// Set up additional CLPKM-related kernel arguments
 	auto venSetKernelArg = Lookup<OclAPI::clSetKernelArg>();
-	cl_uint Threshold = getRuntimeKeeper().getCRThreshold();
+	cl_uint Threshold = RT.getCRThreshold();
 
 	// Set args
 	auto Idx = Profile.NumOfParam;
@@ -459,10 +499,9 @@ cl_int clEnqueueNDRangeKernel(cl_command_queue Queue,
 
 	// XXX: REWRITE START
 	// This event will be set if the kernel really finished
-	*Event = Lookup<OclAPI::clCreateUserEvent>()(Context, &Ret);
-
-	if (Ret != CL_SUCCESS)
-		return Ret;
+	if (Event != nullptr)
+		*Event = Lookup<OclAPI::clCreateUserEvent>()(Context, &Ret);
+	OCL_ASSERT(Ret);
 
 	clEvent SubEvent = getEvent(NULL);
 
@@ -494,6 +533,12 @@ cl_int clEnqueueNDRangeKernel(cl_command_queue Queue,
 
 	return Ret;
 
+	}
+catch (const __ocl_error& OclError) {
+	return OclError;
+	}
+catch (const std::bad_alloc& ) {
+	return CL_OUT_OF_HOST_MEMORY;
 	}
 
 cl_int clReleaseKernel(cl_kernel Kernel) {
