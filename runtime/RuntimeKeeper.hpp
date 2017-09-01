@@ -24,6 +24,12 @@
 namespace CLPKM {
 
 // Helper classes
+struct QueueInfo {
+	cl_context       Context;
+	cl_device_id     Device;
+	cl_command_queue ShadowQueue;
+	};
+
 struct ProgramInfo {
 	cl_program  ShadowProgram;
 	std::string BuildLog;
@@ -43,6 +49,7 @@ struct EventLog {
 	cl_ulong End;
 	};
 
+using QueueTable = std::unordered_map<cl_command_queue, QueueInfo>;
 using ProgramTable = std::unordered_map<cl_program, ProgramInfo>;
 using KernelTable = std::unordered_map<cl_kernel, KernelInfo>;
 using EventLogger = std::unordered_map<cl_event, EventLog>;
@@ -76,9 +83,11 @@ public:
 	state_t getState() { return State; }
 	priority getPriority() { return Priority; }
 
+	QueueTable&   getQueueTable() { return QT; }
 	ProgramTable& getProgramTable() { return PT; }
 	KernelTable&  getKernelTable() { return KT; }
 	EventLogger&  getEventLogger() { return EL; }
+
 	const std::string& getCompilerPath() { return CompilerPath; }
 	tlv_t getCRThreshold() { return Threshold; }
 
@@ -134,6 +143,7 @@ private:
 
 	// Members
 	// OpenCL related stuff
+	QueueTable   QT;
 	ProgramTable PT;
 	KernelTable  KT;
 	EventLogger  EL;
