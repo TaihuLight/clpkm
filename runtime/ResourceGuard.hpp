@@ -37,10 +37,8 @@ public:
 	ResGuard(const ResGuard& ) = delete;
 	ResGuard& operator=(const ResGuard& ) = delete;
 
-	ResGuard(ResGuard&& RHS) {
-		Resource = RHS.Resource;
-		RHS.Resource = NULL;
-		}
+	ResGuard(ResGuard&& RHS)
+	: Resource(RHS.Resource), Finalize(RHS.Finalize) { RHS.Resource = NULL; }
 
 	ResGuard& operator=(ResGuard&& RHS) {
 		Release();
