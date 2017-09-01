@@ -28,8 +28,9 @@ void CLPKM::MetaEnqueue(CallbackData* Work, cl_uint NumWaiting,
 	OCL_ASSERT(Ret);
 
 	Ret = Lookup<OclAPI::clEnqueueReadBuffer>()(
-		Work->Queue, Work->DeviceHeader.get(), CL_FALSE, 0, Work->HostHeader.size(),
-		Work->HostHeader.data(), 1, &Work->PrevWork[0].get(), &EventRead.get());
+		Work->Queue, Work->DeviceHeader.get(), CL_FALSE, 0,
+		Work->HostHeader.size() * sizeof(cl_int), Work->HostHeader.data(), 1,
+		&Work->PrevWork[0].get(), &EventRead.get());
 	OCL_ASSERT(Ret);
 
 	// Set up callback to continue

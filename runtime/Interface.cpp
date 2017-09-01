@@ -482,7 +482,7 @@ cl_int clEnqueueNDRangeKernel(cl_command_queue Queue,
 			std::move(WriteHeaderEvent), std::move(Final));
 
 	// This throws exception on error
-	MetaEnqueue(Work, NewWaitingList.size(), NewWaitingList.data());
+	MetaEnqueue(Work, NumOfWaiting + 1, NewWaitingList.data());
 
 	return Ret;
 
