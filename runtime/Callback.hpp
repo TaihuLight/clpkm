@@ -9,6 +9,7 @@
 #define __CLPKM__CALLBACK_HPP__
 
 #include "ResourceGuard.hpp"
+#include <chrono>
 #include <vector>
 #include <CL/opencl.h>
 
@@ -24,12 +25,13 @@ struct CallbackData {
 	             std::vector<size_t>&& IGWO, std::vector<size_t>&& IGWS,
 	             std::vector<size_t>&& ILWS,
 	             clMemObj&& DH, clMemObj&& LB, clMemObj&& PB,
-	             std::vector<cl_int>&& HH, clEvent&& E, clEvent&& F)
+	             std::vector<cl_int>&& HH, clEvent&& E, clEvent&& F,
+	             std::chrono::high_resolution_clock::time_point TP)
 	: Queue(Q), Kernel(K), WorkDim(D), GWO(std::move(IGWO)),
 	  GWS(std::move(IGWS)), LWS(std::move(ILWS)), DeviceHeader(std::move(DH)),
 	  LocalBuffer(std::move(LB)), PrivateBuffer(std::move(PB)),
 	  HostHeader(std::move(HH)), PrevWork{getEvent(NULL), std::move(E)},
-	  Final(std::move(F)) { }
+	  Final(std::move(F)), LastCall(TP), Counter(0) { }
 
 	// Shadow queue and kernel to run
 	cl_command_queue Queue;
@@ -58,6 +60,10 @@ struct CallbackData {
 	// the device.
 	clEvent PrevWork[2];
 	clEvent Final;
+
+	// Profiling related stuff
+	std::chrono::high_resolution_clock::time_point LastCall;
+	unsigned Counter;
 
 	};
 

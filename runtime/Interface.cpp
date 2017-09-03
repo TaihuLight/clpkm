@@ -140,8 +140,10 @@ cl_command_queue clCreateCommandQueue(cl_context Context, cl_device_id Device,
 	auto QueueWrap = getQueue(Queue);
 
 	// Create shadow queue
+	constexpr auto Property =
+			CL_QUEUE_OUT_OF_ORDER_EXEC_MODE_ENABLE | CL_QUEUE_PROFILING_ENABLE;
 	clQueue ShadowQueue = getQueue(Lookup<OclAPI::clCreateCommandQueue>()(
-			Context, Device, CL_QUEUE_OUT_OF_ORDER_EXEC_MODE_ENABLE, &Ret));
+			Context, Device, Property, &Ret));
 	OCL_ASSERT(Ret);
 
 	// Create a slot for the queue
@@ -170,7 +172,29 @@ catch (const std::bad_alloc& ) {
 	}
 
 cl_int clReleaseCommandQueue(cl_command_queue Queue) try {
-	// TODO
+
+	auto& RT = getRuntimeKeeper();
+	auto& QT = RT.getQueueTable();
+	auto It = QT.find(Queue);
+
+	if (It == QT.end())
+		return CL_INVALID_COMMAND_QUEUE;
+
+	cl_uint RefCount = 0;
+
+	cl_int Ret = Lookup<OclAPI::clGetCommandQueueInfo>()(
+			Queue, CL_QUEUE_REFERENCE_COUNT, sizeof(cl_uint), &RefCount, nullptr);
+	OCL_ASSERT(Ret);
+
+	auto venReleaseQueue = Lookup<OclAPI::clReleaseCommandQueue>();
+
+	if (RefCount <= 1) {
+		venReleaseQueue(It->second.ShadowQueue);
+		QT.erase(It);
+		}
+
+	return venReleaseQueue(Queue);
+
 	}
 catch (const __ocl_error& OclError) {
 	return OclError;
@@ -479,7 +503,8 @@ cl_int clEnqueueNDRangeKernel(cl_command_queue Queue,
 			std::vector<size_t>(GWS, GWS + WorkDim),
 			std::move(RealLWS), std::move(DeviceHeader),
 			std::move(LocalBuffer), std::move(PrivateBuffer), std::move(HostHeader),
-			std::move(WriteHeaderEvent), std::move(Final));
+			std::move(WriteHeaderEvent), std::move(Final),
+			std::chrono::high_resolution_clock::now());
 
 	// This throws exception on error
 	MetaEnqueue(Work, NumOfWaiting + 1, NewWaitingList.data());

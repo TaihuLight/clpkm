@@ -15,6 +15,58 @@ using namespace CLPKM;
 
 
 
+namespace {
+
+cl_uint getRefCount(cl_event Event) {
+
+	cl_uint RefCount = 0;
+
+	cl_int Ret = Lookup<OclAPI::clGetEventInfo>()(
+			Event, CL_EVENT_REFERENCE_COUNT, sizeof(cl_uint), &RefCount, nullptr);
+	OCL_ASSERT(Ret);
+
+	return RefCount;
+
+	}
+
+cl_ulong getExecTime(cl_event Event) {
+
+	cl_ulong Start = 0;
+	cl_ulong End = 0;
+
+	auto venGetEvProfInfo = Lookup<OclAPI::clGetEventProfilingInfo>();
+
+	// CL_PROFILING_COMMAND_QUEUED
+	// CL_PROFILING_COMMAND_SUBMIT
+
+	cl_int Ret = venGetEvProfInfo(Event, CL_PROFILING_COMMAND_START,
+	                              sizeof(cl_ulong), &Start, nullptr);
+	OCL_ASSERT(Ret);
+
+	Ret = venGetEvProfInfo(Event, CL_PROFILING_COMMAND_END, sizeof(cl_ulong),
+	                       &End, nullptr);
+	OCL_ASSERT(Ret);
+
+	return (End - Start);
+
+	}
+
+void LogEventProfInfo(RuntimeKeeper& RT, cl_event Event) {
+
+	// The timestamp is in nanosecs
+	constexpr float ToMilli = 0.000001f;
+	cl_ulong ExecTime = getExecTime(Event);
+
+	RT.Log(RuntimeKeeper::loglevel::INFO,
+	       "==CLPKM==   prev work run for %f ms\n",
+	       ExecTime * ToMilli);
+
+	}
+
+}
+
+
+
 void CLPKM::MetaEnqueue(CallbackData* Work, cl_uint NumWaiting,
                         cl_event* WaitingList) {
 
@@ -55,6 +107,19 @@ void CL_CALLBACK CLPKM::ResumeOrFinish(cl_event Event, cl_int ExecStatus,
 	auto* Work = static_cast<CallbackData*>(UserData);
 	clEvent ThisEvent = getEvent(Event);
 	cl_int Ret = CL_SUCCESS;
+	auto& RT = getRuntimeKeeper();
+
+	// Update timestamp
+	auto Now = std::chrono::high_resolution_clock::now();
+	std::chrono::duration<double, std::milli> Interval = Now - Work->LastCall;
+
+	RT.Log(RuntimeKeeper::loglevel::INFO,
+	       "\n==CLPKM== Callback called on kernel %p (run #%u)\n"
+	       "==CLPKM==   interval between last call %f ms\n",
+	       Work->Kernel,
+	       ++Work->Counter,
+	       Interval.count());
+	Work->LastCall = Now;
 
 	// Step 1
 	// Check the status of associated run
@@ -70,11 +135,15 @@ void CL_CALLBACK CLPKM::ResumeOrFinish(cl_event Event, cl_int ExecStatus,
 		OCL_ASSERT(Ret);
 		// Status of the event associated to previous enqueued commands
 		OCL_ASSERT(Status);
+		// Log execution time
+		LogEventProfInfo(RT, Work->PrevWork[Idx].get());
 		// Release so MetaEnqueue can use the slot
 		Work->PrevWork[Idx].Release();
 		}
 	// Status of the event associated to clEnqueueReadBuffer
 	OCL_ASSERT(ExecStatus);
+	// Log execution time
+	LogEventProfInfo(RT, Event);
 
 	// Step 2
 	// If finished
