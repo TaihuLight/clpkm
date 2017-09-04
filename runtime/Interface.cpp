@@ -16,6 +16,7 @@
 #include "RuntimeKeeper.hpp"
 
 #include <cstring>
+#include <mutex>
 #include <string>
 #include <vector>
 
@@ -180,6 +181,11 @@ cl_int clReleaseCommandQueue(cl_command_queue Queue) try {
 	if (It == QT.end())
 		return CL_INVALID_COMMAND_QUEUE;
 
+	// Put mutex here to prevent multi-threads got old reference count and
+	// nobody releases the shadow queue
+	static std::mutex Mutex;
+	std::lock_guard<std::mutex> Lock(Mutex);
+
 	cl_uint RefCount = 0;
 
 	cl_int Ret = Lookup<OclAPI::clGetCommandQueueInfo>()(
@@ -189,7 +195,8 @@ cl_int clReleaseCommandQueue(cl_command_queue Queue) try {
 	auto venReleaseQueue = Lookup<OclAPI::clReleaseCommandQueue>();
 
 	if (RefCount <= 1) {
-		venReleaseQueue(It->second.ShadowQueue);
+		Ret = venReleaseQueue(It->second.ShadowQueue);
+		assert(Ret == CL_SUCCESS && "Failed to release shadow command queue");
 		QT.erase(It);
 		}
 
@@ -233,7 +240,7 @@ cl_int clBuildProgram(cl_program Program,
                       cl_uint NumOfDevice, const cl_device_id* DeviceList,
                       const char* Options,
                       void (*Notify)(cl_program, void* ),
-                      void* UserData) {
+                      void* UserData) try {
 
 	// FIXME: we can't handle clBuildProgram on the same program twice atm
 	std::string Source;
@@ -242,9 +249,7 @@ cl_int clBuildProgram(cl_program Program,
 	auto venGetProgramInfo = Lookup<OclAPI::clGetProgramInfo>();
 	cl_int Ret = venGetProgramInfo(Program, CL_PROGRAM_SOURCE, 0, nullptr,
 	                               &SourceLength);
-
-	if (Ret != CL_SUCCESS)
-		return Ret;
+	OCL_ASSERT(Ret);
 
 	// Must be greater than zero because the size includes null terminator
 	assert(SourceLength > 0 && "clGetProgramInfo returned zero source length");
@@ -253,25 +258,21 @@ cl_int clBuildProgram(cl_program Program,
 	// kernel, it returns a null string
 	// TODO: we may want to support this?
 	if (SourceLength == 1)
-		throw std::runtime_error("Yet impl'd");
+		throw std::runtime_error("Build program from binary is yet impl'd");
 
 	// Retrieve the source to instrument and remove the null terminator
 	Source.resize(SourceLength, '\0');
 	Ret = venGetProgramInfo(Program, CL_PROGRAM_SOURCE, SourceLength,
 	                        Source.data(), nullptr);
+	OCL_ASSERT(Ret);
 	Source.resize(SourceLength - 1);
-
-	if (Ret != CL_SUCCESS)
-		return Ret;
 
 	cl_context Context;
 
 	// Retrieve the context to build a new program
 	Ret = venGetProgramInfo(Program, CL_PROGRAM_CONTEXT, sizeof(Context),
 	                        &Context, nullptr);
-
-	if (Ret != CL_SUCCESS)
-		return Ret;
+	OCL_ASSERT(Ret);
 
 	auto& PT = getRuntimeKeeper().getProgramTable();
 	ProfileList PL;
@@ -291,9 +292,7 @@ cl_int clBuildProgram(cl_program Program,
 	// Build a new program with instrumented code
 	cl_program ShadowProgram = Lookup<OclAPI::clCreateProgramWithSource>()(
 			Context, 1, &Ptr, &Len, &Ret);
-
-	if (Ret != CL_SUCCESS)
-		return Ret;
+	OCL_ASSERT(Ret);
 
 	auto& Entry = PT[Program];
 	Entry.ShadowProgram = ShadowProgram;
@@ -303,6 +302,12 @@ cl_int clBuildProgram(cl_program Program,
 	return Lookup<OclAPI::clBuildProgram>()(
 			ShadowProgram, NumOfDevice, DeviceList, Options, Notify, UserData);
 
+	}
+catch (const __ocl_error& OclError) {
+	return OclError;
+	}
+catch (const std::bad_alloc& ) {
+	return CL_OUT_OF_HOST_MEMORY;
 	}
 
 cl_kernel clCreateKernel(cl_program Program, const char* Name, cl_int* Ret) {
@@ -496,7 +501,7 @@ cl_int clEnqueueNDRangeKernel(cl_command_queue Queue,
 	OCL_ASSERT(Ret);
 
 	// New callback
-	CallbackData* Work = new CallbackData(
+	auto Work = std::make_unique<CallbackData>(
 			QueueInfo.ShadowQueue, Kernel, WorkDim,
 			GWO ? std::vector<size_t>(GWO, GWO + WorkDim)
 			    : std::vector<size_t>(WorkDim, 0),
@@ -507,7 +512,10 @@ cl_int clEnqueueNDRangeKernel(cl_command_queue Queue,
 			std::chrono::high_resolution_clock::now());
 
 	// This throws exception on error
-	MetaEnqueue(Work, NumOfWaiting + 1, NewWaitingList.data());
+	MetaEnqueue(Work.get(), NumOfWaiting + 1, NewWaitingList.data());
+
+	// Prevent it from being released
+	Work.release();
 
 	return Ret;
 
@@ -521,36 +529,66 @@ catch (const std::bad_alloc& ) {
 
 cl_int clReleaseKernel(cl_kernel Kernel) {
 
-	auto& KT = getRuntimeKeeper().getKernelTable();
+	auto& RT = getRuntimeKeeper();
+	auto& KT = RT.getKernelTable();
 	auto It = KT.find(Kernel);
 
 	if (It == KT.end())
 		return CL_INVALID_KERNEL;
 
-	KT.erase(It);
+	// Avoid from getting old reference count
+	static std::mutex Mutex;
+	std::lock_guard<std::mutex> Lock(Mutex);
+
+	cl_uint RefCount = 0;
+
+	cl_int Ret = Lookup<OclAPI::clGetKernelInfo>()(
+			Kernel, CL_KERNEL_REFERENCE_COUNT, sizeof(cl_uint), &RefCount, nullptr);
+	OCL_ASSERT(Ret);
+
+	if (RefCount <= 1)
+		KT.erase(It);
 
 	return Lookup<OclAPI::clReleaseKernel>()(Kernel);
 
 	}
 
-cl_int clReleaseProgram(cl_program Program) {
+cl_int clReleaseProgram(cl_program Program) try {
+
+	auto& RT = getRuntimeKeeper();
+	auto& PT = RT.getProgramTable();
+	auto It = PT.find(Program);
 
 	auto venReleaseProgram = Lookup<OclAPI::clReleaseProgram>();
 
-	auto& PT = getRuntimeKeeper().getProgramTable();
-	auto It = PT.find(Program);
+	// Avoid from getting old reference count
+	static std::mutex Mutex;
+	std::lock_guard<std::mutex> Lock(Mutex);
 
 	// Release shadow program
 	if (It != PT.end()) {
-		if (It->second.ShadowProgram != NULL) {
-			auto Ret = venReleaseProgram(It->second.ShadowProgram);
-			assert(Ret == CL_SUCCESS && "clReleaseProgram failed on shadow program");
+
+		cl_uint RefCount = 0;
+
+		cl_int Ret = Lookup<OclAPI::clGetProgramInfo>()(
+			Program, CL_PROGRAM_REFERENCE_COUNT, sizeof(cl_uint), &RefCount, nullptr);
+		OCL_ASSERT(Ret);
+
+		if (RefCount <= 1) {
+			if (It->second.ShadowProgram != NULL) {
+				Ret = venReleaseProgram(It->second.ShadowProgram);
+				assert(Ret == CL_SUCCESS && "Failed to release shadow program");
+				}
+			PT.erase(It);
 			}
-		PT.erase(It);
+
 		}
 
 	return venReleaseProgram(Program);
 
+	}
+catch (const __ocl_error& OclError) {
+	return OclError;
 	}
 
 }
