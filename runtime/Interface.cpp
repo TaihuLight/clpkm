@@ -147,8 +147,11 @@ cl_command_queue clCreateCommandQueue(cl_context Context, cl_device_id Device,
 			Context, Device, Property, &Ret));
 	OCL_ASSERT(Ret);
 
+	auto& RT = getRuntimeKeeper();
+
 	// Create a slot for the queue
-	auto& Entry = getRuntimeKeeper().getQueueTable()[Queue];
+	boost::unique_lock<boost::upgrade_mutex> Lock(RT.getQTLock());
+	auto& Entry = RT.getQueueTable()[Queue];
 
 	Entry.Context = Context;
 	Entry.Device = Device;
@@ -156,6 +159,7 @@ cl_command_queue clCreateCommandQueue(cl_context Context, cl_device_id Device,
 
 	// If we reach here, things shall be fine
 	// Set to NULL to prevent it from being released
+	Lock.unlock();
 	QueueWrap.get() = NULL;
 	ShadowQueue.get() = NULL;
 	*ErrorRet = CL_SUCCESS;
@@ -176,6 +180,8 @@ cl_int clReleaseCommandQueue(cl_command_queue Queue) try {
 
 	auto& RT = getRuntimeKeeper();
 	auto& QT = RT.getQueueTable();
+
+	boost::upgrade_lock<boost::upgrade_mutex> RdLock(RT.getQTLock());
 	auto It = QT.find(Queue);
 
 	if (It == QT.end())
@@ -197,6 +203,8 @@ cl_int clReleaseCommandQueue(cl_command_queue Queue) try {
 	if (RefCount <= 1) {
 		Ret = venReleaseQueue(It->second.ShadowQueue);
 		INTER_ASSERT(Ret == CL_SUCCESS, "failed to release shadow command queue");
+
+		boost::upgrade_to_unique_lock<boost::upgrade_mutex> WrLock(RdLock);
 		QT.erase(It);
 		}
 
@@ -212,7 +220,10 @@ cl_int clGetProgramBuildInfo(cl_program Program, cl_device_id Device,
                              size_t ParamValSize, void* ParamVal,
                              size_t* ParamValSizeRet) {
 
-	auto& PT = getRuntimeKeeper().getProgramTable();
+	auto& RT = getRuntimeKeeper();
+	auto& PT = RT.getProgramTable();
+
+	boost::shared_lock<boost::upgrade_mutex> RdLock(RT.getPTLock());
 	auto It = PT.find(Program);
 
 	// Found
@@ -274,16 +285,22 @@ cl_int clBuildProgram(cl_program Program,
 	                        &Context, nullptr);
 	OCL_ASSERT(Ret);
 
-	auto& PT = getRuntimeKeeper().getProgramTable();
+	auto& RT = getRuntimeKeeper();
+	auto& PT = RT.getProgramTable();
 	ProfileList PL;
 
 	// Now invoke CLPKMCC
 	if (!CLPKM::Compile(Source, Options, PL)) {
+
+		boost::unique_lock<boost::upgrade_mutex> Lock(RT.getPTLock());
 		auto& Entry = PT[Program];
+
 		Entry.ShadowProgram = NULL;
 		Entry.BuildLog = std::move(Source);
 		Entry.KernelProfileList.clear();
+
 		return CL_BUILD_PROGRAM_FAILURE;
+
 		}
 
 	const char* Ptr = Source.data();
@@ -294,7 +311,9 @@ cl_int clBuildProgram(cl_program Program,
 			Context, 1, &Ptr, &Len, &Ret);
 	OCL_ASSERT(Ret);
 
+	boost::unique_lock<boost::upgrade_mutex> Lock(RT.getPTLock());
 	auto& Entry = PT[Program];
+
 	Entry.ShadowProgram = ShadowProgram;
 	Entry.KernelProfileList = std::move(PL);
 
@@ -312,8 +331,11 @@ catch (const std::bad_alloc& ) {
 
 cl_kernel clCreateKernel(cl_program Program, const char* Name, cl_int* Ret) {
 
-	auto& PT = getRuntimeKeeper().getProgramTable();
-	auto It = PT.find(Program);
+	auto& RT = getRuntimeKeeper();
+	auto& PT = RT.getProgramTable();
+
+	boost::shared_lock<boost::upgrade_mutex> RdLock(RT.getPTLock());
+	const auto It = PT.find(Program);
 
 	if (It == PT.end()) {
 		if (Ret != nullptr)
@@ -341,8 +363,10 @@ cl_kernel clCreateKernel(cl_program Program, const char* Name, cl_int* Ret) {
 	cl_kernel Kernel = Lookup<OclAPI::clCreateKernel>()(
 			It->second.ShadowProgram, Name, Ret);
 
-	if (Kernel != NULL)
-		getRuntimeKeeper().getKernelTable()[Kernel].Profile = &(*Pos);
+	if (Kernel != NULL) {
+		boost::unique_lock<boost::upgrade_mutex> WrLock(RT.getKTLock());
+		RT.getKernelTable()[Kernel].Profile = &(*Pos);
+		}
 
 	return Kernel;
 
@@ -362,8 +386,10 @@ cl_int clEnqueueNDRangeKernel(cl_command_queue Queue,
 	auto& QT = RT.getQueueTable();
 	auto& KT = RT.getKernelTable();
 
-	auto QueueEntry = QT.find(Queue);
-	auto It = KT.find(Kernel);
+	boost::shared_lock<boost::upgrade_mutex> QTLock(RT.getQTLock());
+	boost::shared_lock<boost::upgrade_mutex> KTLock(RT.getKTLock());
+	const auto QueueEntry = QT.find(Queue);
+	const auto It = KT.find(Kernel);
 
 	// Step 0
 	// Pre-check
@@ -531,6 +557,8 @@ cl_int clReleaseKernel(cl_kernel Kernel) {
 
 	auto& RT = getRuntimeKeeper();
 	auto& KT = RT.getKernelTable();
+
+	boost::upgrade_lock<boost::upgrade_mutex> RdLock(RT.getKTLock());
 	auto It = KT.find(Kernel);
 
 	if (It == KT.end())
@@ -546,8 +574,10 @@ cl_int clReleaseKernel(cl_kernel Kernel) {
 			Kernel, CL_KERNEL_REFERENCE_COUNT, sizeof(cl_uint), &RefCount, nullptr);
 	OCL_ASSERT(Ret);
 
-	if (RefCount <= 1)
+	if (RefCount <= 1) {
+		boost::upgrade_to_unique_lock<boost::upgrade_mutex> WrLock(RdLock);
 		KT.erase(It);
+		}
 
 	return Lookup<OclAPI::clReleaseKernel>()(Kernel);
 
@@ -557,6 +587,8 @@ cl_int clReleaseProgram(cl_program Program) try {
 
 	auto& RT = getRuntimeKeeper();
 	auto& PT = RT.getProgramTable();
+
+	boost::upgrade_lock<boost::upgrade_mutex> RdLock(RT.getPTLock());
 	auto It = PT.find(Program);
 
 	auto venReleaseProgram = Lookup<OclAPI::clReleaseProgram>();
@@ -580,6 +612,7 @@ cl_int clReleaseProgram(cl_program Program) try {
 			Ret = venReleaseProgram(It->second.ShadowProgram);
 			INTER_ASSERT(Ret == CL_SUCCESS, "failed to release shadow program");
 			}
+		boost::upgrade_to_unique_lock<boost::upgrade_mutex> WrLock(RdLock);
 		PT.erase(It);
 		}
 
