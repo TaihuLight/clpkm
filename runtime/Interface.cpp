@@ -138,12 +138,12 @@ cl_command_queue clCreateCommandQueue(cl_context Context, cl_device_id Device,
 			Context, Device, Properties, &Ret);
 	OCL_ASSERT(Ret);
 
-	auto QueueWrap = getQueue(Queue);
+	auto QueueWrap = clQueue(Queue);
 
 	// Create shadow queue
 	constexpr auto Property =
 			CL_QUEUE_OUT_OF_ORDER_EXEC_MODE_ENABLE | CL_QUEUE_PROFILING_ENABLE;
-	clQueue ShadowQueue = getQueue(Lookup<OclAPI::clCreateCommandQueue>()(
+	clQueue ShadowQueue = clQueue(Lookup<OclAPI::clCreateCommandQueue>()(
 			Context, Device, Property, &Ret));
 	OCL_ASSERT(Ret);
 
@@ -455,13 +455,13 @@ cl_int clEnqueueNDRangeKernel(cl_command_queue Queue,
 	// Prepare header and live value buffers
 	auto venCreateBuffer = Lookup<OclAPI::clCreateBuffer>();
 
-	clMemObj DeviceHeader = getMemObj(
+	clMemObj DeviceHeader = clMemObj(
 			venCreateBuffer(QueueInfo.Context, CL_MEM_READ_WRITE,
 			                sizeof(cl_int) * NumOfThread, nullptr, &Ret));
 	OCL_ASSERT(Ret);
 
 	// TODO: runtime decided size
-	clMemObj LocalBuffer = getMemObj(
+	clMemObj LocalBuffer = clMemObj(
 			Profile.ReqLocSize > 0
 			? venCreateBuffer(QueueInfo.Context, CL_MEM_READ_WRITE,
 			                  Profile.ReqLocSize * NumOfWorkGrp,
@@ -469,7 +469,7 @@ cl_int clEnqueueNDRangeKernel(cl_command_queue Queue,
 			: NULL);
 	OCL_ASSERT(Ret);
 
-	clMemObj PrivateBuffer = getMemObj(
+	clMemObj PrivateBuffer = clMemObj(
 			Profile.ReqPrvSize > 0
 			? venCreateBuffer(QueueInfo.Context, CL_MEM_READ_WRITE,
 			                  Profile.ReqPrvSize * NumOfThread,
@@ -484,7 +484,7 @@ cl_int clEnqueueNDRangeKernel(cl_command_queue Queue,
 
 	// cl_int, i.e. signed 2's complement 32-bit integer, shall suffice
 	std::vector<cl_int> HostHeader(NumOfThread, 1);
-	clEvent WriteHeaderEvent = getEvent(NULL);
+	clEvent WriteHeaderEvent(NULL);
 
 	// Write Header and put the event to the end of NewWaitingList
 	Ret = venEnqWrBuf(QueueInfo.ShadowQueue, DeviceHeader.get(), CL_FALSE, 0,
@@ -519,7 +519,7 @@ cl_int clEnqueueNDRangeKernel(cl_command_queue Queue,
 	// Set up the works
 
 	// This event will be set if the kernel really finished
-	clEvent Final = getEvent(Lookup<OclAPI::clCreateUserEvent>()(
+	clEvent Final = clEvent(Lookup<OclAPI::clCreateUserEvent>()(
 			QueueInfo.Context, &Ret));
 	OCL_ASSERT(Ret);
 

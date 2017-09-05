@@ -70,7 +70,7 @@ void LogEventProfInfo(RuntimeKeeper& RT, cl_event Event) {
 void CLPKM::MetaEnqueue(CallbackData* Work, cl_uint NumWaiting,
                         cl_event* WaitingList) {
 
-	clEvent EventRead = getEvent(NULL);
+	clEvent EventRead(NULL);
 
 	// Enqueue kernel and read data
 	cl_int Ret = Lookup<OclAPI::clEnqueueNDRangeKernel>()(
@@ -105,7 +105,7 @@ void CL_CALLBACK CLPKM::ResumeOrFinish(cl_event Event, cl_int ExecStatus,
                                        void* UserData) try {
 
 	auto* Work = static_cast<CallbackData*>(UserData);
-	clEvent ThisEvent = getEvent(Event);
+	clEvent ThisEvent(Event);
 	cl_int Ret = CL_SUCCESS;
 	auto& RT = getRuntimeKeeper();
 

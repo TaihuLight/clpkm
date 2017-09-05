@@ -9,73 +9,97 @@
 #define __CLPKM__RESOURCE_GUARD_HPP__
 
 #include "LookupVendorImpl.hpp"
+#include <type_traits>
 #include <CL/opencl.h>
 
 
 
 namespace CLPKM {
 
+template <class T>
+struct Finalizer {
+	cl_int Finalize(T ) {
+		// Stop the compiler from instantiating it early
+		static_assert(!std::is_same<T, T>::value,
+		              "the finalizor of requested type shall be specialized");
+		// This is to suppress warning of returning nothing
+		return CL_SUCCESS;
+		}
+	};
+
+template <>
+struct Finalizer<cl_mem> {
+	cl_int Finalize(cl_mem Mem) {
+		return Lookup<OclAPI::clReleaseMemObject>()(Mem);
+		}
+	};
+
+template <>
+struct Finalizer<cl_event> {
+	cl_int Finalize(cl_event Event) {
+		return Lookup<OclAPI::clReleaseEvent>()(Event);
+		}
+	};
+
+template <>
+struct Finalizer<cl_command_queue> {
+	cl_int Finalize(cl_command_queue Queue) {
+		return Lookup<OclAPI::clReleaseCommandQueue>()(Queue);
+		}
+	};
+
+template <>
+struct Finalizer<cl_program> {
+	cl_int Finalize(cl_program Program) {
+		return Lookup<OclAPI::clReleaseProgram>()(Program);
+		}
+	};
+
 // A special RAII guard tailored for OpenCL stuff
-template <class ResType, class FinType>
-class ResGuard {
+// The inheritence is to enable empty base class optimization
+template <class ResType>
+class ResGuard : private Finalizer<ResType> {
 public:
-	ResGuard(ResType R, FinType F)
-	: Resource(R), Finalize(F) { }
+	ResGuard(ResType R)
+	: Resource(R) { }
+
+	ResGuard(ResGuard&& RHS)
+	: Resource(RHS.Resource) { RHS.Resource = NULL; }
 
 	~ResGuard() { Release(); }
+
+	ResGuard& operator=(ResGuard&& RHS) {
+		Release();
+		Resource = RHS.Resource;
+		}
 
 	cl_int Release(void) {
 		cl_int Ret = CL_SUCCESS;
 		if (Resource != NULL) {
-			Ret = Finalize(Resource);
+			Ret = Finalizer<ResType>::Finalize(Resource);
 			Resource = NULL;
 			}
 		return Ret;
 		}
 
+	ResType& get(void) { return Resource; }
+
 	ResGuard() = delete;
 	ResGuard(const ResGuard& ) = delete;
 	ResGuard& operator=(const ResGuard& ) = delete;
 
-	ResGuard(ResGuard&& RHS)
-	: Resource(RHS.Resource), Finalize(RHS.Finalize) { RHS.Resource = NULL; }
-
-	ResGuard& operator=(ResGuard&& RHS) {
-		Release();
-		Resource = RHS.Resource;
-		RHS.Resource = NULL;
-		}
-
-	ResType& get(void) { return Resource; }
-
 private:
 	ResType Resource;
-	FinType Finalize;
 
 	};
 
-using clMemObj = ResGuard<cl_mem, decltype(&clReleaseMemObject)>;
-using clEvent = ResGuard<cl_event, decltype(&clReleaseEvent)>;
-using clQueue = ResGuard<cl_command_queue, decltype(&clReleaseCommandQueue)>;
+
+using clMemObj = ResGuard<cl_mem>;
+using clEvent = ResGuard<cl_event>;
+using clQueue = ResGuard<cl_command_queue>;
+using clProgram = ResGuard<cl_program>;
 
 } // namespace CLPKM
-
-namespace {
-
-inline CLPKM::clMemObj getMemObj(cl_mem MemObj) {
-	return CLPKM::clMemObj(
-			MemObj, CLPKM::Lookup<CLPKM::OclAPI::clReleaseMemObject>());
-	}
-
-inline CLPKM::clEvent getEvent(cl_event Event) {
-	return CLPKM::clEvent(Event, CLPKM::Lookup<CLPKM::OclAPI::clReleaseEvent>());
-	}
-
-inline CLPKM::clQueue getQueue(cl_command_queue Queue) {
-	return CLPKM::clQueue(Queue, CLPKM::Lookup<CLPKM::OclAPI::clReleaseCommandQueue>());
-	}
-
-} // namespace
 
 
 

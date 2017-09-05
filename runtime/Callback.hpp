@@ -30,7 +30,7 @@ struct CallbackData {
 	: Queue(Q), Kernel(K), WorkDim(D), GWO(std::move(IGWO)),
 	  GWS(std::move(IGWS)), LWS(std::move(ILWS)), DeviceHeader(std::move(DH)),
 	  LocalBuffer(std::move(LB)), PrivateBuffer(std::move(PB)),
-	  HostHeader(std::move(HH)), PrevWork{getEvent(NULL), std::move(E)},
+	  HostHeader(std::move(HH)), PrevWork{NULL, std::move(E)},
 	  Final(std::move(F)), LastCall(TP), Counter(0) { }
 
 	// Shadow queue and kernel to run
