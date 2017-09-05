@@ -152,11 +152,7 @@ void CL_CALLBACK CLPKM::ResumeOrFinish(cl_event Event, cl_int ExecStatus,
 		Ret = Lookup<OclAPI::clSetUserEventStatus>()(Work->Final.get(), CL_COMPLETE);
 		// Note: if the call failed here, following commands are likely to get
 		//       stuck forever...
-		if (Ret != CL_SUCCESS) {
-			getRuntimeKeeper().Log(RuntimeKeeper::loglevel::ERROR,
-			                       "\n==CLPKM== clSetUserEventStatus ret'd " PRId32 "\n",
-			                        Ret);
-			}
+		INTER_ASSERT(Ret == CL_SUCCESS, "failed to set user event status");
 		delete Work;
 		return;
 		}
@@ -170,10 +166,6 @@ catch (const __ocl_error& OclError) {
 	auto* Work = static_cast<CallbackData*>(UserData);
 	cl_int Ret = Lookup<OclAPI::clSetUserEventStatus>()(
 			Work->Final.get(), OclError);
-	if (Ret != CL_SUCCESS) {
-		getRuntimeKeeper().Log(RuntimeKeeper::loglevel::ERROR,
-		                       "\n==CLPKM== clSetUserEventStatus ret'd " PRId32 "\n",
-		                       Ret);
-		}
+	INTER_ASSERT(Ret == CL_SUCCESS, "failed to set user event status");
 	delete Work;
 	}

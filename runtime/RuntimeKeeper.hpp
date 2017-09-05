@@ -14,6 +14,7 @@
 
 #include <cstdint>
 #include <cstdio>
+#include <shared_mutex>
 #include <string>
 #include <unordered_map>
 
@@ -60,13 +61,6 @@ using tlv_t = cl_uint;
 // Main class
 class RuntimeKeeper {
 public:
-	enum state_t {
-		SUCCEED = 0,
-		INVALID_CONFIG,
-		UNKNOWN_ERROR,
-		NUM_OF_STATE
-	};
-
 	enum priority {
 		HIGH = 0,
 		LOW,
@@ -80,7 +74,6 @@ public:
 		NUM_OF_LOGLEVEL
 		};
 
-	state_t getState() { return State; }
 	priority getPriority() { return Priority; }
 
 	QueueTable&   getQueueTable() { return QT; }
@@ -113,7 +106,7 @@ public:
 			}
 
 	public:
-		virtual state_t operator()(RuntimeKeeper& ) const = 0;
+		virtual bool operator()(RuntimeKeeper& ) const = 0;
 		virtual ~ConfigLoader() { }
 
 		};
@@ -125,11 +118,16 @@ private:
 	// Internal functions
 	// Default parameters
 	RuntimeKeeper()
-	: State(SUCCEED), Priority(LOW), LogLevel(FATAL), PT(), KT(), EL(),
+	: Priority(LOW), LogLevel(FATAL), PT(), KT(), EL(),
 	  CompilerPath("/usr/bin/clpkm.sh"), Threshold(1000000) { }
 
 	RuntimeKeeper(const ConfigLoader& CL)
-	: RuntimeKeeper() { State = CL(*this); }
+	: RuntimeKeeper() {
+		if(!CL(*this)) {
+			this->Log(loglevel::FATAL, "\n==CLPKM== Failed to load config\n");
+			std::terminate();
+			}
+		}
 
 	void setPriority(priority P) { Priority = P; }
 	void setLogLevel(loglevel L) { LogLevel = L; }
@@ -137,7 +135,6 @@ private:
 	void setCRThreshold(tlv_t T) { Threshold = T; }
 
 	// Internal status
-	state_t  State;
 	priority Priority;
 	loglevel LogLevel;
 

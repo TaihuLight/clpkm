@@ -18,8 +18,7 @@
 namespace {
 
 struct DefaultLoader : public CLPKM::RuntimeKeeper::ConfigLoader {
-	CLPKM::RuntimeKeeper::state_t
-	operator()(CLPKM::RuntimeKeeper& RT) const override {
+	bool operator()(CLPKM::RuntimeKeeper& RT) const override {
 		// Load global config from config file
 		// yaml-cpp throws exception on error
 		try {
@@ -38,7 +37,7 @@ struct DefaultLoader : public CLPKM::RuntimeKeeper::ConfigLoader {
 				ConfigLoader::setCRThreshold(RT, Config["threshold"].as<CLPKM::tlv_t>());
 			}
 		catch (...) {
-			return CLPKM::RuntimeKeeper::INVALID_CONFIG;
+			return false;
 			}
 
 		// Override config if specified from environment variable
@@ -52,7 +51,7 @@ struct DefaultLoader : public CLPKM::RuntimeKeeper::ConfigLoader {
 				ConfigLoader::setLogLevel(RT, CLPKM::RuntimeKeeper::loglevel::INFO);
 			}
 
-		return CLPKM::RuntimeKeeper::SUCCEED;
+		return true;
 		}
 	};
 

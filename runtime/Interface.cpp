@@ -196,7 +196,7 @@ cl_int clReleaseCommandQueue(cl_command_queue Queue) try {
 
 	if (RefCount <= 1) {
 		Ret = venReleaseQueue(It->second.ShadowQueue);
-		assert(Ret == CL_SUCCESS && "Failed to release shadow command queue");
+		INTER_ASSERT(Ret == CL_SUCCESS, "failed to release shadow command queue");
 		QT.erase(It);
 		}
 
@@ -252,7 +252,7 @@ cl_int clBuildProgram(cl_program Program,
 	OCL_ASSERT(Ret);
 
 	// Must be greater than zero because the size includes null terminator
-	assert(SourceLength > 0 && "clGetProgramInfo returned zero source length");
+	INTER_ASSERT(SourceLength > 0, "clGetProgramInfo returned zero source length");
 
 	// If the program is created via clCreateProgramWithBinary or is a built-in
 	// kernel, it returns a null string
@@ -561,27 +561,26 @@ cl_int clReleaseProgram(cl_program Program) try {
 
 	auto venReleaseProgram = Lookup<OclAPI::clReleaseProgram>();
 
+	// Maybe a program never being built
+	if (It == PT.end())
+		return venReleaseProgram(Program);
+
 	// Avoid from getting old reference count
 	static std::mutex Mutex;
 	std::lock_guard<std::mutex> Lock(Mutex);
 
-	// Release shadow program
-	if (It != PT.end()) {
+	cl_uint RefCount = 0;
 
-		cl_uint RefCount = 0;
+	cl_int Ret = Lookup<OclAPI::clGetProgramInfo>()(
+		Program, CL_PROGRAM_REFERENCE_COUNT, sizeof(cl_uint), &RefCount, nullptr);
+	OCL_ASSERT(Ret);
 
-		cl_int Ret = Lookup<OclAPI::clGetProgramInfo>()(
-			Program, CL_PROGRAM_REFERENCE_COUNT, sizeof(cl_uint), &RefCount, nullptr);
-		OCL_ASSERT(Ret);
-
-		if (RefCount <= 1) {
-			if (It->second.ShadowProgram != NULL) {
-				Ret = venReleaseProgram(It->second.ShadowProgram);
-				assert(Ret == CL_SUCCESS && "Failed to release shadow program");
-				}
-			PT.erase(It);
+	if (RefCount <= 1) {
+		if (It->second.ShadowProgram != NULL) {
+			Ret = venReleaseProgram(It->second.ShadowProgram);
+			INTER_ASSERT(Ret == CL_SUCCESS, "failed to release shadow program");
 			}
-
+		PT.erase(It);
 		}
 
 	return venReleaseProgram(Program);
