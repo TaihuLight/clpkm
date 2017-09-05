@@ -54,7 +54,7 @@ cl_ulong getExecTime(cl_event Event) {
 void LogEventProfInfo(RuntimeKeeper& RT, cl_event Event) {
 
 	// The timestamp is in nanosecs
-	constexpr float ToMilli = 0.000001f;
+	constexpr double ToMilli = 0.000001f;
 	cl_ulong ExecTime = getExecTime(Event);
 
 	RT.Log(RuntimeKeeper::loglevel::INFO,

@@ -1,7 +1,7 @@
 /*
   RuntimeKeeper.hpp
 
-  Globals or so
+  RuntimeKeeper holds global stuffs for the runtime
 
 */
 
@@ -14,10 +14,10 @@
 
 #include <cstdint>
 #include <cstdio>
-#include <shared_mutex>
 #include <string>
 #include <unordered_map>
 
+#include <boost/thread/shared_mutex.hpp>
 #include <CL/opencl.h>
 
 
@@ -74,15 +74,19 @@ public:
 		NUM_OF_LOGLEVEL
 		};
 
-	priority getPriority() { return Priority; }
+	priority getPriority() const { return Priority; }
 
 	QueueTable&   getQueueTable() { return QT; }
 	ProgramTable& getProgramTable() { return PT; }
 	KernelTable&  getKernelTable() { return KT; }
 	EventLogger&  getEventLogger() { return EL; }
 
-	const std::string& getCompilerPath() { return CompilerPath; }
-	tlv_t getCRThreshold() { return Threshold; }
+	auto& getQTLock() { return QTLock; }
+	auto& getPTLock() { return PTLock; }
+	auto& getKTLock() { return KTLock; }
+
+	const std::string& getCompilerPath() const { return CompilerPath; }
+	tlv_t getCRThreshold() const { return Threshold; }
 
 	template <class ... T>
 	void Log(loglevel Level, T&& ... FormatStr) {
@@ -144,6 +148,11 @@ private:
 	ProgramTable PT;
 	KernelTable  KT;
 	EventLogger  EL;
+
+	// Locks
+	boost::upgrade_mutex QTLock;
+	boost::upgrade_mutex PTLock;
+	boost::upgrade_mutex KTLock;
 
 	// Config stuff
 	std::string CompilerPath;
