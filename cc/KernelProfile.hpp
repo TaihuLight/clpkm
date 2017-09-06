@@ -62,24 +62,9 @@ struct llvm::yaml::MappingTraits<KernelProfile> {
 		}
 	};
 
-// For STL containers
-template <
-	template <class, class> class C,
-	class T,
-	class A
-	>
-struct llvm::yaml::SequenceTraits<C<T, A>> {
-
-	static size_t size(llvm::yaml::IO& , C<T, A>& List) {
-		return List.size();
-		}
-
-	static T& element(llvm::yaml::IO& , C<T, A>& List, std::size_t Index) {
-		if(Index >= List.size())
-			List.resize(Index + 1);
-		return List[Index];
-		}
-
+template <>
+struct llvm::yaml::SequenceElementTraits<KernelProfile> {
+	static const bool flow = false;
 	};
 
 #endif

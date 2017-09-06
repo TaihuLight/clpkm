@@ -17,10 +17,10 @@ OBJS     := ${SRCS:%.cpp=%.o}
 all: $(TARGET)
 
 $(TARGET): $(OBJS)
-	$(CXX) $(CXXFLAGS) $(LDFLAGS) $^ -o $@ $(LIBS)
+	$(CXX) $(CXXFLAGS) $(LDFLAGS) -std=c++17 $^ -o $@ $(LIBS)
 
 %.o: %.cpp
-	$(CXX) $(CXXFLAGS) $< -c -o $@
+	$(CXX) $(CXXFLAGS) -std=c++17 $< -c -o $@
 
 .PHONY: clean
 
