@@ -11,6 +11,7 @@
 
 
 #include "KernelProfile.hpp"
+#include "ResourceGuard.hpp"
 
 #include <cstdint>
 #include <cstdio>
@@ -26,21 +27,29 @@ namespace CLPKM {
 
 // Helper classes
 struct QueueInfo {
-	cl_context       Context;
-	cl_device_id     Device;
-	cl_command_queue ShadowQueue;
+	cl_context   Context;
+	cl_device_id Device;
+	clQueue      ShadowQueue;
+
+	QueueInfo(cl_context C, cl_device_id D, clQueue&& Q)
+	: Context(C), Device(D), ShadowQueue(std::move(Q)) { }
 	};
 
 struct ProgramInfo {
-	cl_program  ShadowProgram;
+	clProgram   ShadowProgram;
 	std::string BuildLog;
 	ProfileList KernelProfileList;
-	ProgramInfo() : ShadowProgram(NULL), BuildLog(), KernelProfileList() { }
+
+	ProgramInfo(clProgram&& P, std::string&& BL, ProfileList&& PL)
+	: ShadowProgram(std::move(P)), BuildLog(std::move(BL)),
+	  KernelProfileList(std::move(PL)) { }
 	};
 
 struct KernelInfo {
 	KernelProfile* Profile;
-	KernelInfo() : Profile(nullptr) { }
+
+	KernelInfo(KernelProfile* KP)
+	: Profile(KP) { }
 	};
 
 struct EventLog {

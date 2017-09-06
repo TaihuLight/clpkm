@@ -132,39 +132,40 @@ cl_command_queue clCreateCommandQueue(cl_context Context, cl_device_id Device,
                                       cl_command_queue_properties Properties,
                                       cl_int* ErrorRet) try {
 
-	// Create original queue
 	auto Ret = CL_SUCCESS;
-	auto Queue = Lookup<OclAPI::clCreateCommandQueue>()(
+
+	// Create original queue
+	auto RawQueue = Lookup<OclAPI::clCreateCommandQueue>()(
 			Context, Device, Properties, &Ret);
 	OCL_ASSERT(Ret);
 
-	auto QueueWrap = clQueue(Queue);
+	clQueue QueueWrap(RawQueue);
 
 	// Create shadow queue
-	constexpr auto Property =
-			CL_QUEUE_OUT_OF_ORDER_EXEC_MODE_ENABLE | CL_QUEUE_PROFILING_ENABLE;
-	clQueue ShadowQueue = clQueue(Lookup<OclAPI::clCreateCommandQueue>()(
-			Context, Device, Property, &Ret));
+	constexpr auto Property = CL_QUEUE_OUT_OF_ORDER_EXEC_MODE_ENABLE |
+	                          CL_QUEUE_PROFILING_ENABLE;
+
+	clQueue ShadowQueue = Lookup<OclAPI::clCreateCommandQueue>()(
+			Context, Device, Property, &Ret);
 	OCL_ASSERT(Ret);
 
 	auto& RT = getRuntimeKeeper();
+	auto& QT = RT.getQueueTable();
+
+	QueueInfo NewInfo(Context, Device, std::move(ShadowQueue));
 
 	// Create a slot for the queue
 	boost::unique_lock<boost::upgrade_mutex> Lock(RT.getQTLock());
-	auto& Entry = RT.getQueueTable()[Queue];
 
-	Entry.Context = Context;
-	Entry.Device = Device;
-	Entry.ShadowQueue = ShadowQueue.get();
+	const auto It = QT.emplace(RawQueue, std::move(NewInfo));
+	INTER_ASSERT(It.second, "insertion to queue table didn't take place");
 
 	// If we reach here, things shall be fine
 	// Set to NULL to prevent it from being released
-	Lock.unlock();
 	QueueWrap.get() = NULL;
-	ShadowQueue.get() = NULL;
 	*ErrorRet = CL_SUCCESS;
 
-	return Queue;
+	return RawQueue;
 
 	}
 catch (const __ocl_error& OclError) {
@@ -182,10 +183,12 @@ cl_int clReleaseCommandQueue(cl_command_queue Queue) try {
 	auto& QT = RT.getQueueTable();
 
 	boost::upgrade_lock<boost::upgrade_mutex> RdLock(RT.getQTLock());
-	auto It = QT.find(Queue);
+	const auto It = QT.find(Queue);
 
 	if (It == QT.end())
 		return CL_INVALID_COMMAND_QUEUE;
+
+	auto venReleaseQueue = Lookup<OclAPI::clReleaseCommandQueue>();
 
 	// Put mutex here to prevent multi-threads got old reference count and
 	// nobody releases the shadow queue
@@ -198,12 +201,7 @@ cl_int clReleaseCommandQueue(cl_command_queue Queue) try {
 			Queue, CL_QUEUE_REFERENCE_COUNT, sizeof(cl_uint), &RefCount, nullptr);
 	OCL_ASSERT(Ret);
 
-	auto venReleaseQueue = Lookup<OclAPI::clReleaseCommandQueue>();
-
 	if (RefCount <= 1) {
-		Ret = venReleaseQueue(It->second.ShadowQueue);
-		INTER_ASSERT(Ret == CL_SUCCESS, "failed to release shadow command queue");
-
 		boost::upgrade_to_unique_lock<boost::upgrade_mutex> WrLock(RdLock);
 		QT.erase(It);
 		}
@@ -224,13 +222,13 @@ cl_int clGetProgramBuildInfo(cl_program Program, cl_device_id Device,
 	auto& PT = RT.getProgramTable();
 
 	boost::shared_lock<boost::upgrade_mutex> RdLock(RT.getPTLock());
-	auto It = PT.find(Program);
+	const auto It = PT.find(Program);
 
 	// Found
 	if (It != PT.end()) {
 		// If its shadow is valid, use shadow
-		if (It->second.ShadowProgram != NULL)
-			Program = It->second.ShadowProgram;
+		if (It->second.ShadowProgram.get() != NULL)
+			Program = It->second.ShadowProgram.get();
 		// If not, we can intercept CL_PROGRAM_BUILD_LOG
 		else if (ParamName == CL_PROGRAM_BUILD_LOG) {
 			if (ParamVal != nullptr && ParamValSize > It->second.BuildLog.size())
@@ -267,9 +265,10 @@ cl_int clBuildProgram(cl_program Program,
 
 	// If the program is created via clCreateProgramWithBinary or is a built-in
 	// kernel, it returns a null string
-	// TODO: we may want to support this?
-	if (SourceLength == 1)
-		throw std::runtime_error("Build program from binary is yet impl'd");
+	if (SourceLength == 1) {
+		// TODO: we may want to support this?
+		INTER_ASSERT(false, "Build program from binary is yet impl'd");
+		}
 
 	// Retrieve the source to instrument and remove the null terminator
 	Source.resize(SourceLength, '\0');
@@ -292,12 +291,14 @@ cl_int clBuildProgram(cl_program Program,
 	// Now invoke CLPKMCC
 	if (!CLPKM::Compile(Source, Options, PL)) {
 
-		boost::unique_lock<boost::upgrade_mutex> Lock(RT.getPTLock());
-		auto& Entry = PT[Program];
+		// Build log is put in source
+		ProgramInfo NewEntry(NULL, std::move(Source), ProfileList());
 
-		Entry.ShadowProgram = NULL;
-		Entry.BuildLog = std::move(Source);
-		Entry.KernelProfileList.clear();
+		boost::unique_lock<boost::upgrade_mutex> Lock(RT.getPTLock());
+		const auto It = PT.emplace(Program, std::move(NewEntry));
+
+		// FIXME: this is possible when a program is built serveral times
+		INTER_ASSERT(It.second, "insertion to program table didn't take place");
 
 		return CL_BUILD_PROGRAM_FAILURE;
 
@@ -307,19 +308,23 @@ cl_int clBuildProgram(cl_program Program,
 	const size_t Len = Source.size();
 
 	// Build a new program with instrumented code
-	cl_program ShadowProgram = Lookup<OclAPI::clCreateProgramWithSource>()(
+	cl_program RawShadowProgram = Lookup<OclAPI::clCreateProgramWithSource>()(
 			Context, 1, &Ptr, &Len, &Ret);
 	OCL_ASSERT(Ret);
 
-	boost::unique_lock<boost::upgrade_mutex> Lock(RT.getPTLock());
-	auto& Entry = PT[Program];
+	clProgram ShadowProgram = RawShadowProgram;
 
-	Entry.ShadowProgram = ShadowProgram;
-	Entry.KernelProfileList = std::move(PL);
+	ProgramInfo NewEntry(std::move(ShadowProgram), std::string(), std::move(PL));
+
+	boost::unique_lock<boost::upgrade_mutex> Lock(RT.getPTLock());
+	const auto It = PT.emplace(Program, std::move(NewEntry));
+
+	// FIXME: this is possible, if build a program serveral times
+	INTER_ASSERT(It.second, "insertion to program table didn't take place");
 
 	// Call the vendor's impl to build the instrumented code
 	return Lookup<OclAPI::clBuildProgram>()(
-			ShadowProgram, NumOfDevice, DeviceList, Options, Notify, UserData);
+			RawShadowProgram, NumOfDevice, DeviceList, Options, Notify, UserData);
 
 	}
 catch (const __ocl_error& OclError) {
@@ -343,7 +348,7 @@ cl_kernel clCreateKernel(cl_program Program, const char* Name, cl_int* Ret) {
 		return NULL;
 		}
 
-	if (It->second.ShadowProgram == NULL) {
+	if (It->second.ShadowProgram.get() == NULL) {
 		if (Ret != nullptr)
 			*Ret = CL_INVALID_PROGRAM_EXECUTABLE;
 		return NULL;
@@ -361,11 +366,12 @@ cl_kernel clCreateKernel(cl_program Program, const char* Name, cl_int* Ret) {
 		}
 
 	cl_kernel Kernel = Lookup<OclAPI::clCreateKernel>()(
-			It->second.ShadowProgram, Name, Ret);
+			It->second.ShadowProgram.get(), Name, Ret);
 
 	if (Kernel != NULL) {
 		boost::unique_lock<boost::upgrade_mutex> WrLock(RT.getKTLock());
-		RT.getKernelTable()[Kernel].Profile = &(*Pos);
+		const auto& It = RT.getKernelTable().emplace(Kernel, &(*Pos));
+		INTER_ASSERT(It.second, "insertion to kernel table didn't table place");
 		}
 
 	return Kernel;
@@ -402,8 +408,8 @@ cl_int clEnqueueNDRangeKernel(cl_command_queue Queue,
 	if ((NumOfWaiting > 0 && !WaitingList) || (NumOfWaiting <= 0 && WaitingList))
 		return CL_INVALID_EVENT_WAIT_LIST;
 
-	auto& Profile = *(It->second).Profile;
 	auto& QueueInfo = QueueEntry->second;
+	auto& Profile = *(It->second).Profile;
 	cl_int Ret = CL_SUCCESS;
 
 	// Check whether the kernel and queue are in the same context
@@ -487,8 +493,8 @@ cl_int clEnqueueNDRangeKernel(cl_command_queue Queue,
 	clEvent WriteHeaderEvent(NULL);
 
 	// Write Header and put the event to the end of NewWaitingList
-	Ret = venEnqWrBuf(QueueInfo.ShadowQueue, DeviceHeader.get(), CL_FALSE, 0,
-	                  sizeof(cl_int) * NumOfThread, HostHeader.data(),
+	Ret = venEnqWrBuf(QueueInfo.ShadowQueue.get(), DeviceHeader.get(), CL_FALSE,
+	                  0, sizeof(cl_int) * NumOfThread, HostHeader.data(),
 	                  0, nullptr, &WriteHeaderEvent.get());
 	OCL_ASSERT(Ret);
 
@@ -503,8 +509,9 @@ cl_int clEnqueueNDRangeKernel(cl_command_queue Queue,
 	// Step 4
 	// Set up additional CLPKM-related kernel arguments
 	auto venSetKernelArg = Lookup<OclAPI::clSetKernelArg>();
-	cl_uint Threshold = RT.getCRThreshold();
 	auto Idx = Profile.NumOfParam;
+
+	cl_uint Threshold = RT.getCRThreshold();
 
 	Ret = venSetKernelArg(Kernel, Idx++, sizeof(cl_mem), &DeviceHeader.get());
 	OCL_ASSERT(Ret);
@@ -519,8 +526,8 @@ cl_int clEnqueueNDRangeKernel(cl_command_queue Queue,
 	// Set up the works
 
 	// This event will be set if the kernel really finished
-	clEvent Final = clEvent(Lookup<OclAPI::clCreateUserEvent>()(
-			QueueInfo.Context, &Ret));
+	clEvent Final = Lookup<OclAPI::clCreateUserEvent>()(
+			QueueInfo.Context, &Ret);
 	OCL_ASSERT(Ret);
 
 	Ret = clEnqueueMarkerWithWaitList(Queue, 1, &Final.get(), Event);
@@ -528,7 +535,7 @@ cl_int clEnqueueNDRangeKernel(cl_command_queue Queue,
 
 	// New callback
 	auto Work = std::make_unique<CallbackData>(
-			QueueInfo.ShadowQueue, Kernel, WorkDim,
+			QueueInfo.ShadowQueue.get(), Kernel, WorkDim,
 			GWO ? std::vector<size_t>(GWO, GWO + WorkDim)
 			    : std::vector<size_t>(WorkDim, 0),
 			std::vector<size_t>(GWS, GWS + WorkDim),
@@ -559,7 +566,7 @@ cl_int clReleaseKernel(cl_kernel Kernel) {
 	auto& KT = RT.getKernelTable();
 
 	boost::upgrade_lock<boost::upgrade_mutex> RdLock(RT.getKTLock());
-	auto It = KT.find(Kernel);
+	const auto It = KT.find(Kernel);
 
 	if (It == KT.end())
 		return CL_INVALID_KERNEL;
@@ -585,13 +592,13 @@ cl_int clReleaseKernel(cl_kernel Kernel) {
 
 cl_int clReleaseProgram(cl_program Program) try {
 
+	auto venReleaseProgram = Lookup<OclAPI::clReleaseProgram>();
+
 	auto& RT = getRuntimeKeeper();
 	auto& PT = RT.getProgramTable();
 
 	boost::upgrade_lock<boost::upgrade_mutex> RdLock(RT.getPTLock());
-	auto It = PT.find(Program);
-
-	auto venReleaseProgram = Lookup<OclAPI::clReleaseProgram>();
+	const auto It = PT.find(Program);
 
 	// Maybe a program never being built
 	if (It == PT.end())
@@ -608,10 +615,6 @@ cl_int clReleaseProgram(cl_program Program) try {
 	OCL_ASSERT(Ret);
 
 	if (RefCount <= 1) {
-		if (It->second.ShadowProgram != NULL) {
-			Ret = venReleaseProgram(It->second.ShadowProgram);
-			INTER_ASSERT(Ret == CL_SUCCESS, "failed to release shadow program");
-			}
 		boost::upgrade_to_unique_lock<boost::upgrade_mutex> WrLock(RdLock);
 		PT.erase(It);
 		}

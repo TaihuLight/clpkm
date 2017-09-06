@@ -118,6 +118,8 @@ bool CLPKM::Compile(std::string& Source, const char* Options, ProfileList& PL) {
 	if (!CloseFd(SrcPipe[1]) || Ret == -1)
 		return Cleanup();
 
+	Source.clear();
+
 	char Buffer[1024];
 
 	// Read instrumented code
@@ -139,7 +141,7 @@ bool CLPKM::Compile(std::string& Source, const char* Options, ProfileList& PL) {
 	int ChildStatus = 0;
 
 	if (waitpid(Pid, &ChildStatus, 0) == -1 || WEXITSTATUS(ChildStatus) != 0) {
-		Source = Yaml;
+		Source = std::move(Yaml);
 		Pid = 0;
 		Cleanup(true);
 		return false;
@@ -162,12 +164,12 @@ bool CLPKM::Compile(std::string& Source, const char* Options, ProfileList& PL) {
 		PL = KP.as<ProfileList>();
 		}
 	catch (const YAML::Exception& YE) {
-		Source = "Invalid kernel profile: " + std::string(YE.what());
+		Source = std::string("Invalid kernel profile: ") + YE.what();
 		Cleanup(true);
 		return false;
 		}
 	catch (const std::exception& SE) {
-		Source = "Caught standard exception: " + std::string(SE.what());
+		Source = std::string("Caught standard exception: ") + SE.what();
 		Cleanup(true);
 		return false;
 		}
