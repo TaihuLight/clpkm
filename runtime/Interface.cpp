@@ -28,6 +28,21 @@ using namespace CLPKM;
 
 namespace {
 
+std::string ToHumanReadable(size_t S) {
+		float  R = S;
+		size_t U = 0;
+
+		const char* UntTbl[] = {" B", " KiB", " MiB", "GiB", "TiB"};
+		constexpr size_t UntTblSize = sizeof(UntTbl) / sizeof(char*);
+
+		while (R > 1024 && U < UntTblSize) {
+			R /= 1024.0f;
+			U++;
+			}
+
+		return std::to_string(R) + UntTbl[U];
+		}
+
 std::vector<size_t> FindWorkGroupSize(cl_kernel Kernel, cl_device_id Device,
                                       size_t WorkDim, size_t MaxDim,
                                       const size_t* WorkSize,
@@ -369,8 +384,10 @@ cl_kernel clCreateKernel(cl_program Program, const char* Name, cl_int* Ret) {
 			It->second.ShadowProgram.get(), Name, Ret);
 
 	if (Kernel != NULL) {
+		KernelInfo NewInfo(&(*Pos),
+		                   std::vector<cl_uint>(0, Pos->LocPtrParamIdx.size()));
 		boost::unique_lock<boost::upgrade_mutex> WrLock(RT.getKTLock());
-		const auto& It = RT.getKernelTable().emplace(Kernel, &(*Pos));
+		const auto& It = RT.getKernelTable().emplace(Kernel, std::move(NewInfo));
 		INTER_ASSERT(It.second, "insertion to kernel table didn't table place");
 		}
 
@@ -408,6 +425,7 @@ cl_int clEnqueueNDRangeKernel(cl_command_queue Queue,
 	if ((NumOfWaiting > 0 && !WaitingList) || (NumOfWaiting <= 0 && WaitingList))
 		return CL_INVALID_EVENT_WAIT_LIST;
 
+	// FIXME: Shall we also lock ProgramTable?
 	auto& QueueInfo = QueueEntry->second;
 	auto& Profile = *(It->second).Profile;
 	cl_int Ret = CL_SUCCESS;
@@ -456,6 +474,15 @@ cl_int clEnqueueNDRangeKernel(cl_command_queue Queue,
 		NumOfThread  *= GWS[Idx];
 		NumOfWorkGrp *= GWS[Idx] / RealLWS[Idx];
 		}
+
+	RT.Log(RuntimeKeeper::loglevel::INFO,
+	       "\n==CLPKM== Launch kernel %p, mem usage of LVBs:\n"
+	       "==CLPKM==   __private: %s (%zu Bytes x %zu work-items)\n"
+	       "==CLPKM==   __local:   %s (%zu Bytes x %zu work-groups)\n",
+	       Kernel, ToHumanReadable(Profile.ReqPrvSize * NumOfThread).c_str(),
+	       Profile.ReqPrvSize, NumOfThread,
+	       ToHumanReadable(Profile.ReqLocSize * NumOfWorkGrp).c_str(),
+	       Profile.ReqLocSize, NumOfWorkGrp);
 
 	// Step 2
 	// Prepare header and live value buffers
@@ -625,5 +652,34 @@ cl_int clReleaseProgram(cl_program Program) try {
 catch (const __ocl_error& OclError) {
 	return OclError;
 	}
+
+
+cl_int clSetKernelArg(cl_kernel Kernel, cl_uint ArgIndex, size_t ArgSize,
+                      const void* ArgValue) {
+
+	auto& RT = getRuntimeKeeper();
+	auto& PT = RT.getProgramTable();
+	auto& KT = RT.getKernelTable();
+
+	boost::shared_lock<boost::upgrade_mutex> KTLock(RT.getKTLock());
+	const auto& KTEntry = KT.find(Kernel);
+
+	if (KTEntry == KT.end())
+		return CL_INVALID_KERNEL;
+
+	const auto& DynLocParams = KTEntry.Profile->LocPtrParamIdx;
+
+	const auto& It = std::lower_bound(DynLocParams.begin(),
+	                                  DynLocParams.end(),
+	                                  ArgIndex);
+
+	if (It == DynLocParams.end() || *It != ArgIndex)
+		return Lookup<OclAPI::clSetKernelArg>()(Kernel, ArgIndex, ArgSize, ArgValue);
+
+	// TODO
+	return CL_SUCCESS;
+
+	}
+
 
 }

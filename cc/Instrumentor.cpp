@@ -174,7 +174,7 @@ bool Instrumentor::TraverseFunctionDecl(FunctionDecl* FuncDecl) {
 	// Append arguments
 	auto LastParam = FuncDecl->getParamDecl(NumOfParam - 1);
 	auto InsertCut = LastParam->getSourceRange().getEnd();
-	const char* CLPKMParam = ", __global int * restrict __clpkm_hdr, "
+	const char* CLPKMParam = ", __global int * restrict __clpkm_metadata, "
 	                         "__global char * restrict __clpkm_local, "
 	                         "__global char * restrict __clpkm_prv, "
 	                         "__const uint __clpkm_tlv";
@@ -216,9 +216,11 @@ bool Instrumentor::TraverseFunctionDecl(FunctionDecl* FuncDecl) {
 	// Inject main control flow
 	TheRewriter.InsertTextAfterToken(
 		FuncDecl->getBody()->getLocStart(),
-		"\n  size_t __clpkm_id = 0; // work-item id \n"
+		"\n  __global const uint* __clpkm_dloc_sz_tbl = (__global uint*) __clpkm_metadata;\n"
+		"  __global int* __clpkm_hdr = __clpkm_metadata + " + std::to_string(PLEntry.LocPtrParamIdx.size()) + ";\n"
+		"  size_t __clpkm_id = 0; // work-item id \n"
 		"  size_t __clpkm_grp_id = 0; // work-group id \n"
-		"  uint __clpkm_ctr = 0;\n"
+		"  uint __clpkm_ctr = 0; // cost counter\n"
 		"  // Compute linear IDs and adjust live value buffer\n"
 		"  __get_linear_id(&__clpkm_id, &__clpkm_grp_id);\n"
 		"  __clpkm_prv += __clpkm_id * " + ReqPrvSizeVar + ";\n"
@@ -402,10 +404,33 @@ auto Instrumentor::GenerateLocfefe(std::vector<DeclStmt*>& LocDecl, Rewriter& R,
 
 	KP.ReqLocSize += ReqLocSize;
 
+	std::string StrOffset = std::to_string(ReqLocSize);
+
+	// Set up offset for runtime decided local size
+	LC.first += "size_t __clpkm_dloc_offset = " + StrOffset + "; ";
+	LC.second += "size_t __clpkm_dloc_offset = " + StrOffset + "; ";
+
+	size_t IdxAcc = 0;
+
 	// Runtime decide
 	for (unsigned ParamIdx : KP.LocPtrParamIdx) {
-		// TODO
+
+			std::string StrLocArg = "(__local char*)" + std::string(
+							FD->getParamDecl(ParamIdx)->getIdentifier()->getNameStart());
+			std::string StrSize = "__clpkm_dloc_sz_tbl[" + std::to_string(IdxAcc) + "]";
+
+			LC.first += "__clpkm_cp_ev = async_work_group_copy("
+			            "__clpkm_local + __clpkm_dloc_offset, " +
+			            StrLocArg + ", " + StrSize + ", __clpkm_cp_ev); "
+			            "__clpkm_dloc_offset += " + StrSize + "; ";
+			LC.second += "__clpkm_cp_ev = async_work_group_copy(" +
+			             std::move(StrLocArg) + ", "
+			             "__clpkm_local + __clpkm_dloc_offset, " +
+			             std::move(StrSize) + ", __clpkm_cp_ev); "
+			             "__clpkm_dloc_offset += " + StrSize + "; ";
+
 		++NumOfEvent;
+
 		}
 
 	// Nothing to store
