@@ -429,6 +429,7 @@ auto Instrumentor::GenerateLocfefe(std::vector<DeclStmt*>& LocDecl, Rewriter& R,
 			             std::move(StrSize) + ", __clpkm_cp_ev); "
 			             "__clpkm_dloc_offset += " + StrSize + "; ";
 
+		++IdxAcc;
 		++NumOfEvent;
 
 		}

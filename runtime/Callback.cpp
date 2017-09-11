@@ -79,9 +79,13 @@ void CLPKM::MetaEnqueue(CallbackData* Work, cl_uint NumWaiting,
 			&Work->PrevWork[0].get());
 	OCL_ASSERT(Ret);
 
+	cl_int* HostHeader = Work->HostMetadata.data() + Work->HeaderOffset;
+	const size_t HeaderSize = Work->HostMetadata.size() - Work->HeaderOffset;
+
 	Ret = Lookup<OclAPI::clEnqueueReadBuffer>()(
-		Work->Queue, Work->DeviceHeader.get(), CL_FALSE, 0,
-		Work->HostHeader.size() * sizeof(cl_int), Work->HostHeader.data(), 1,
+		Work->Queue, Work->DeviceHeader.get(), CL_FALSE,
+		Work->HeaderOffset * sizeof(cl_int),
+		HeaderSize * sizeof(cl_int), HostHeader, 1,
 		&Work->PrevWork[0].get(), &EventRead.get());
 	OCL_ASSERT(Ret);
 
@@ -114,9 +118,9 @@ void CL_CALLBACK CLPKM::ResumeOrFinish(cl_event Event, cl_int ExecStatus,
 	std::chrono::duration<double, std::milli> Interval = Now - Work->LastCall;
 
 	RT.Log(RuntimeKeeper::loglevel::INFO,
-	       "\n==CLPKM== Callback called on kernel %p (run #%u)\n"
+	       "\n==CLPKM== Callback called on kernel %p (%s) run #%u\n"
 	       "==CLPKM==   interval between last call %f ms\n",
-	       Work->Kernel,
+	       Work->Kernel, Work->KernelName.c_str(),
 	       ++Work->Counter,
 	       Interval.count());
 	Work->LastCall = Now;
@@ -147,7 +151,8 @@ void CL_CALLBACK CLPKM::ResumeOrFinish(cl_event Event, cl_int ExecStatus,
 
 	// Step 2
 	// If finished
-	if (std::none_of(Work->HostHeader.begin(), Work->HostHeader.end(),
+	if (std::none_of(Work->HostMetadata.begin() + Work->HeaderOffset,
+	                 Work->HostMetadata.end(),
 	                 [](cl_int S) -> bool { return S; })) {
 		Ret = Lookup<OclAPI::clSetUserEventStatus>()(Work->Final.get(), CL_COMPLETE);
 		// Note: if the call failed here, following commands are likely to get

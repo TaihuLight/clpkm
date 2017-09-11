@@ -42,8 +42,8 @@ private:
 		if (__status != CL_SUCCESS) { \
 			CLPKM::getRuntimeKeeper().Log( \
 					CLPKM::RuntimeKeeper::loglevel::ERROR, \
-					"\n==CLPKM== %s:%d (%s) ret " \
-					PRId32 "\n", __FILE__, __LINE__, __func__, __status); \
+					"\n==CLPKM== %s:%d (%s) ret %" PRId32 "\n", \
+					__FILE__, __LINE__, __func__, __status); \
 			OCL_THROW(__status); \
 			} \
 		} while (0)

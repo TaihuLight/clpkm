@@ -46,11 +46,13 @@ struct ProgramInfo {
 	};
 
 struct KernelInfo {
+	const std::string    Name;
 	const KernelProfile* Profile;
 	std::vector<cl_uint> DynLocSize;
 
-	KernelInfo(const KernelProfile* KP, std::vector<cl_uint>&& DLS)
-	: Profile(KP), DynLocSize(0, DLS.size()) { }
+	KernelInfo(std::string&& N, const KernelProfile* KP,
+	           std::vector<cl_uint>&& DLS)
+	: Name(std::move(N)), Profile(KP), DynLocSize(std::move(DLS)) { }
 	};
 
 struct EventLog {
