@@ -188,14 +188,20 @@ bool Instrumentor::TraverseFunctionDecl(FunctionDecl* FuncDecl) {
 	// Put a new entry into the kernel profile list
 	auto& PLEntry = ThePL.emplace_back(FuncName, NumOfParam);
 
+	std::string DynSzLocBufSize = "0";
+
 	// Collect info of kernel parameters that point to local memory
 	// The size of these buffers are not deterministic here
 	unsigned ParamIdx = 0;
 	for (ParmVarDecl* PVD : FuncDecl->parameters()) {
 		if (QualType QT = PVD->getType(); QT->isPointerType()) {
-			if (QualType PointeeQT = QT->getPointeeType();
-			    PointeeQT.getAddressSpace() == LangAS::opencl_local)
+			QualType PointeeQT = QT->getPointeeType();
+			if (PointeeQT.getAddressSpace() == LangAS::opencl_local) {
+				DynSzLocBufSize += " + __clpkm_dloc_sz_tbl[" +
+				                   std::to_string(PLEntry.LocPtrParamIdx.size()) +
+				                   "]";
 				PLEntry.LocPtrParamIdx.emplace_back(ParamIdx);
+				}
 //			QualType PointeeQT = QT->getPointeeType();
 //			llvm::errs() << "---> "<< PointeeQT.getAsString() << ' '
 //			             << PVD->getIdentifier()->getNameStart() << '\n';
@@ -224,8 +230,8 @@ bool Instrumentor::TraverseFunctionDecl(FunctionDecl* FuncDecl) {
 		"  // Compute linear IDs and adjust live value buffer\n"
 		"  __get_linear_id(&__clpkm_id, &__clpkm_grp_id);\n"
 		"  __clpkm_prv += __clpkm_id * " + ReqPrvSizeVar + ";\n"
-		// TODO: runtime decide local memory size!
-		"  __clpkm_local += __clpkm_grp_id * " + ReqLocSizeVar + ";\n"
+		"  __clpkm_local += __clpkm_grp_id * (" + ReqLocSizeVar + " + " +
+		                                      DynSzLocBufSize + ");\n"
 		"  // Load live values for variables locate in local memory\n" +
 		std::move(Locfefe.second) +
 		"  switch (__clpkm_hdr[__clpkm_id]) {\n"
