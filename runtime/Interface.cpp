@@ -14,6 +14,7 @@
 #include "LookupVendorImpl.hpp"
 #include "ResourceGuard.hpp"
 #include "RuntimeKeeper.hpp"
+#include "Support.hpp"
 
 #include <algorithm>
 #include <cstring>
@@ -25,121 +26,6 @@
 #include <CL/opencl.h>
 
 using namespace CLPKM;
-
-
-
-namespace {
-
-std::string ToHumanReadable(size_t S) {
-		float  R = S;
-		size_t U = 0;
-
-		const char* UntTbl[] = {" B", " KiB", " MiB", "GiB", "TiB"};
-		constexpr size_t UntTblSize = sizeof(UntTbl) / sizeof(char*);
-
-		while (R > 1024 && U < UntTblSize) {
-			R /= 1024.0f;
-			U++;
-			}
-
-		return std::to_string(R) + UntTbl[U];
-		}
-
-std::vector<size_t> FindWorkGroupSize(cl_kernel Kernel, cl_device_id Device,
-                                      size_t WorkDim, size_t MaxDim,
-                                      const size_t* WorkSize,
-                                      cl_int* Ret) {
-
-	auto venGetDevInfo = Lookup<OclAPI::clGetDeviceInfo>();
-	std::vector<size_t> MaxThreadSize(MaxDim, 1);
-
-	// Find out max size on each dimension
-	*Ret = venGetDevInfo(Device, CL_DEVICE_MAX_WORK_ITEM_SIZES,
-	                     sizeof(size_t) * MaxDim, MaxThreadSize.data(),
-	                     nullptr);
-	OCL_ASSERT(*Ret);
-
-	// Find out max number of work items
-	size_t MaxNumOfThread = 0;
-	auto venGetKernelBlockInfo = Lookup<OclAPI::clGetKernelWorkGroupInfo>();
-
-	*Ret = venGetKernelBlockInfo(Kernel, Device, CL_KERNEL_WORK_GROUP_SIZE,
-	                             sizeof(size_t), &MaxNumOfThread, nullptr);
-	OCL_ASSERT(*Ret);
-
-	std::vector<std::vector<size_t>> Factor(WorkDim);
-
-	// Compute the factors of global work size on each dimension
-	for (size_t Dim = 0; Dim < WorkDim; ++Dim) {
-		for (size_t Num = 1, Quotient;
-		     Num <= (Quotient = WorkSize[Dim] / Num)
-		     && Num <= MaxThreadSize[Dim];
-		     ++Num) {
-			if (WorkSize[Dim] % Num)
-				continue;
-			Factor[Dim].emplace_back(Num);
-			if (Quotient != Num && Quotient <= MaxThreadSize[Dim])
-				Factor[Dim].emplace_back(Quotient);
-			}
-		}
-
-	// Each entry in the set stores an index to a factor in the factor table
-	std::vector<size_t> TrySet(WorkDim, 0);
-	std::vector<size_t> MaxSet(WorkDim, 0);
-	size_t MaxSize = 1;
-
-	auto NextTry = [&]() -> bool {
-		size_t Dim = 0;
-		while (Dim < WorkDim && TrySet[Dim] == Factor[Dim].size() - 1)
-			TrySet[Dim++] = 0;
-		if (Dim >= WorkDim)
-			return false;
-		++TrySet[Dim];
-		return true;
-		};
-
-	// Start from the second try
-	while (NextTry()) {
-		size_t ThisSize = 1;
-		for (size_t Dim = 0; Dim < WorkDim; ++Dim)
-			ThisSize *= Factor[Dim][TrySet[Dim]];
-		if (ThisSize > MaxSize && ThisSize < MaxNumOfThread) {
-			MaxSet = TrySet;
-			MaxSize = ThisSize;
-			}
-		}
-
-	for (size_t Dim = 0; Dim < WorkDim; ++Dim)
-		MaxSet[Dim] = Factor[Dim][MaxSet[Dim]];
-
-	auto ToString = [](auto Start, auto End) -> std::string {
-		std::string S;
-		auto It = Start;
-		if (It != End)
-			S += std::to_string(*It++);
-		while (It != End) {
-			S.append(", ");
-			S.append(std::to_string(*It++));
-			}
-		return S;
-		};
-
-	getRuntimeKeeper().Log(RuntimeKeeper::loglevel::INFO,
-	                       "\n==CLPKM== auto decide local work size\n"
-	                       "==CLPKM==   kernel work-group size: %zu\n"
-	                       "==CLPKM==   device limit: (%s)\n"
-	                       "==CLPKM==   gws: (%s) lws: (%s)\n",
-	                       MaxNumOfThread,
-	                       ToString(MaxThreadSize.begin(),
-	                                MaxThreadSize.end()).c_str(),
-	                       ToString(WorkSize, WorkSize + WorkDim).c_str(),
-	                       ToString(MaxSet.begin(), MaxSet.end()).c_str());
-
-	return MaxSet;
-
-	}
-
-} // namespace
 
 
 
@@ -169,7 +55,8 @@ cl_command_queue clCreateCommandQueue(cl_context Context, cl_device_id Device,
 	auto& RT = getRuntimeKeeper();
 	auto& QT = RT.getQueueTable();
 
-	QueueInfo NewInfo(Context, Device, std::move(ShadowQueue));
+	QueueInfo NewInfo(Context, Device, std::move(ShadowQueue),
+	                  !(Properties & CL_QUEUE_OUT_OF_ORDER_EXEC_MODE_ENABLE));
 
 	// Create a slot for the queue
 	boost::unique_lock<boost::upgrade_mutex> Lock(RT.getQTLock());
@@ -284,7 +171,7 @@ cl_int clBuildProgram(cl_program Program,
 	// kernel, it returns a null string
 	if (SourceLength == 1) {
 		// TODO: we may want to support this?
-		INTER_ASSERT(false, "Build program from binary is yet impl'd");
+		INTER_ASSERT(false, "build program from binary is yet impl'd");
 		}
 
 	// Retrieve the source to instrument and remove the null terminator
@@ -543,12 +430,14 @@ cl_int clEnqueueNDRangeKernel(cl_command_queue Queue,
 	OCL_ASSERT(Ret);
 
 	// Hold original waiting list, in addition to the event of writing header
-	std::vector<cl_event> NewWaitingList(NumOfWaiting + 1, NULL);
+	std::vector<cl_event> NewWaitingList(WaitingList, WaitingList + NumOfWaiting);
 
-	for (size_t Idx = 0; Idx < NumOfWaiting; ++Idx)
-		NewWaitingList[Idx] = WaitingList[Idx];
+	NewWaitingList.emplace_back(WriteMetadataEvent.get());
 
-	NewWaitingList.back() = WriteMetadataEvent.get();
+	std::lock_guard<std::mutex> BlockerLock(*QueueInfo.BlockerMutex);
+
+	if (QueueInfo.TaskBlocker.get() != NULL)
+		NewWaitingList.emplace_back(QueueInfo.TaskBlocker.get());
 
 	// Step 4
 	// Set up additional CLPKM-related kernel arguments
@@ -574,9 +463,8 @@ cl_int clEnqueueNDRangeKernel(cl_command_queue Queue,
 			QueueInfo.Context, &Ret);
 	OCL_ASSERT(Ret);
 
-	Ret = Lookup<OclAPI::clEnqueueMarkerWithWaitList>()(Queue, 1, &Final.get(),
-	                                                    Event);
-	OCL_ASSERT(Ret);
+	Ret = Lookup<OclAPI::clRetainEvent>()(Final.get());
+	INTER_ASSERT(Ret == CL_SUCCESS, "failed to retain user event");
 
 	// New callback
 	auto Work = std::make_unique<CallbackData>(
@@ -587,11 +475,18 @@ cl_int clEnqueueNDRangeKernel(cl_command_queue Queue,
 			std::move(RealLWS), std::move(DeviceMetadata),
 			std::move(LocalBuffer), std::move(PrivateBuffer),
 			std::move(HostMetadata), DynLocSize.size(),
-			std::move(WriteMetadataEvent), std::move(Final),
+			std::move(WriteMetadataEvent), Final.get(),
 			std::chrono::high_resolution_clock::now());
 
 	// This throws exception on error
 	MetaEnqueue(Work.get(), NumOfWaiting + 1, NewWaitingList.data());
+
+	Ret = Lookup<OclAPI::clEnqueueMarkerWithWaitList>()(Queue, 1, &Final.get(),
+	                                                    Event);
+	OCL_ASSERT(Ret);
+
+	if (QueueInfo.ShallReorder)
+		QueueInfo.TaskBlocker = std::move(Final);
 
 	// Prevent it from being released
 	Work.release();
@@ -709,5 +604,186 @@ cl_int clSetKernelArg(cl_kernel Kernel, cl_uint ArgIndex, size_t ArgSize,
 	return CL_SUCCESS;
 
 	}
+
+cl_int clEnqueueReadBuffer(cl_command_queue Queue,
+                           cl_mem  Buffer,
+                           cl_bool Blocking,
+                           size_t  Offset,
+                           size_t  Size,
+                           void*   HostPtr,
+                           cl_uint NumOfWaiting,
+                           const cl_event* WaitingList,
+                           cl_event* Event) try {
+
+	// Invoke with new waiting list and pointer to return the event object
+	auto ReadBuffer = [&](const cl_event* NewWaitingList, size_t NewNumOfWaiting,
+	                      cl_event* AltEvent) -> cl_int {
+		return Lookup<OclAPI::clEnqueueReadBuffer>()(
+				Queue, Buffer, Blocking, Offset, Size, HostPtr, NewNumOfWaiting,
+				NewWaitingList, AltEvent);
+		};
+
+	return Reorder(Queue, WaitingList, NumOfWaiting, Event, ReadBuffer);
+
+	}
+catch (const __ocl_error& OclError) {
+	return OclError;
+	}
+catch (const std::bad_alloc& ) {
+	return CL_OUT_OF_HOST_MEMORY;
+	}
+
+cl_int clEnqueueWriteBuffer(cl_command_queue Queue,
+                            cl_mem  Buffer,
+                            cl_bool Blocking,
+                            size_t  Offset,
+                            size_t  Size,
+                            const void* HostPtr,
+                            cl_uint NumOfWaiting,
+                            const cl_event* WaitingList,
+                            cl_event* Event) try {
+
+	auto WriteBuffer = [&](const cl_event* NewWaitingList, size_t NewNumOfWaiting,
+	                       cl_event* AltEvent) -> cl_int {
+		return Lookup<OclAPI::clEnqueueWriteBuffer>()(
+				Queue, Buffer, Blocking, Offset, Size, HostPtr, NewNumOfWaiting,
+				NewWaitingList, AltEvent);
+		};
+
+	return Reorder(Queue, WaitingList, NumOfWaiting, Event, WriteBuffer);
+
+	}
+catch (const __ocl_error& OclError) {
+	return OclError;
+	}
+catch (const std::bad_alloc& ) {
+	return CL_OUT_OF_HOST_MEMORY;
+	}
+
+cl_int clEnqueueMarker(cl_command_queue Queue, cl_event* Event) try {
+
+	auto EnqueueMarker = [&](const cl_event* WaitingList, size_t NumOfWaiting,
+	                         cl_event* AltEvent) -> cl_int {
+		return Lookup<OclAPI::clEnqueueMarkerWithWaitList>()(
+				Queue, NumOfWaiting, WaitingList, AltEvent);
+		};
+
+	return Reorder(Queue, nullptr, 0, Event, EnqueueMarker);
+
+	}
+catch (const __ocl_error& OclError) {
+	return OclError;
+	}
+catch (const std::bad_alloc& ) {
+	return CL_OUT_OF_HOST_MEMORY;
+	}
+
+void* clEnqueueMapBuffer(cl_command_queue Queue,
+                         cl_mem  Buffer,
+                         cl_bool Blocking,
+                         cl_map_flags MapFlags,
+                         size_t  Offset,
+                         size_t  Size,
+                         cl_uint NumOfWaiting,
+                         const cl_event* WaitingList,
+                         cl_event* Event,
+                         cl_int* ErrorCode) try {
+
+	void* MapPtr = nullptr;
+
+	auto MapBuffer = [&](const cl_event* NewWaitingList, size_t NewNumOfWaiting,
+	                     cl_event* AltEvent) -> cl_int {
+		cl_int Ret = CL_SUCCESS;
+		MapPtr = Lookup<OclAPI::clEnqueueMapBuffer>()(
+				Queue, Buffer, Blocking, MapFlags, Offset, Size, NewNumOfWaiting,
+				NewWaitingList, AltEvent, &Ret);
+		return Ret;
+		};
+
+	*ErrorCode = Reorder(Queue, WaitingList, NumOfWaiting, Event, MapBuffer);
+	return MapPtr;
+
+	}
+catch (const __ocl_error& OclError) {
+	*ErrorCode = OclError;
+	return nullptr;
+	}
+catch (const std::bad_alloc& ) {
+	*ErrorCode = CL_OUT_OF_HOST_MEMORY;
+	return nullptr;
+	}
+
+cl_int clEnqueueUnmapMemObject(cl_command_queue Queue,
+                               cl_mem  MemObj,
+                               void*   MappedPtr,
+                               cl_uint NumOfWaiting,
+                               const cl_event* WaitingList,
+                               cl_event* Event) try {
+
+	auto UnmapMemObj = [&](const cl_event* NewWaitingList, size_t NewNumOfWaiting,
+	                       cl_event* AltEvent) -> cl_int {
+		return Lookup<OclAPI::clEnqueueUnmapMemObject>()(
+				Queue, MemObj, MappedPtr, NewNumOfWaiting, NewWaitingList, AltEvent);
+		};
+
+	return Reorder(Queue, WaitingList, NumOfWaiting, Event, UnmapMemObj);
+
+	}
+catch (const __ocl_error& OclError) {
+	return OclError;
+	}
+catch (const std::bad_alloc& ) {
+	return CL_OUT_OF_HOST_MEMORY;
+	}
+
+cl_int clEnqueueWriteImage(cl_command_queue Queue,
+                           cl_mem Image,
+                           cl_bool Blocking,
+                           const size_t Origin[3],
+                           const size_t Region[3],
+                           size_t InputRowPitch,
+                           size_t InputSlicePitch,
+                           const void* Ptr,
+                           cl_uint NumOfWaiting,
+                           const cl_event* WaitingList,
+                           cl_event* Event) try {
+
+	auto WriteImage = [&](const cl_event* NewWaitingList, size_t NewNumOfWaiting,
+	                      cl_event* AltEvent) -> cl_int {
+		return Lookup<OclAPI::clEnqueueWriteImage>()(
+				Queue, Image, Blocking, Origin, Region, InputRowPitch,
+				InputSlicePitch, Ptr, NewNumOfWaiting,
+				NewWaitingList, AltEvent);
+		};
+
+	return Reorder(Queue, WaitingList, NumOfWaiting, Event, WriteImage);
+
+	}
+catch (const __ocl_error& OclError) {
+	return OclError;
+	}
+catch (const std::bad_alloc& ) {
+	return CL_OUT_OF_HOST_MEMORY;
+	}
+
+// TODO: reorder call to these functions
+// clEnqueueReadBufferRect
+// clEnqueueWriteBufferRect
+// clEnqueueFillBuffer
+// clEnqueueCopyBuffer
+// clEnqueueCopyBufferRect
+// clEnqueueReadImage
+// clEnqueueFillImage
+// clEnqueueCopyImage
+// clEnqueueCopyImageToBuffer
+// clEnqueueCopyBufferToImage
+// clEnqueueMapImage
+// clEnqueueMigrateMemObjects
+// clEnqueueTask
+// clEnqueueNativeKernel
+// clEnqueueMarkerWithWaitList
+// clEnqueueBarrierWithWaitList
+// clEnqueueWaitForEvents
+// clEnqueueBarrier
 
 } // extern "C"

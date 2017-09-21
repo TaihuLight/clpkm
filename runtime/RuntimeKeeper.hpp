@@ -15,6 +15,7 @@
 
 #include <cstdint>
 #include <cstdio>
+#include <mutex>
 #include <string>
 #include <unordered_map>
 
@@ -31,8 +32,13 @@ struct QueueInfo {
 	cl_device_id Device;
 	clQueue      ShadowQueue;
 
-	QueueInfo(cl_context C, cl_device_id D, clQueue&& Q)
-	: Context(C), Device(D), ShadowQueue(std::move(Q)) { }
+	const bool ShallReorder;
+	clEvent    TaskBlocker;
+	std::unique_ptr<std::mutex> BlockerMutex;
+
+	QueueInfo(cl_context C, cl_device_id D, clQueue&& Q, bool SR)
+	: Context(C), Device(D), ShadowQueue(std::move(Q)), ShallReorder(SR),
+	  TaskBlocker(NULL), BlockerMutex(std::make_unique<std::mutex>()) { }
 	};
 
 struct ProgramInfo {

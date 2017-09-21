@@ -69,8 +69,8 @@ public:
 	~ResGuard() { Release(); }
 
 	ResGuard& operator=(ResGuard&& RHS) {
-		Release();
-		Resource = RHS.Resource;
+		std::swap(Resource, RHS.Resource);
+		return (*this);
 		}
 
 	cl_int Release(void) {
