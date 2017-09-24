@@ -24,13 +24,13 @@ struct CallbackData {
 
 	CallbackData(cl_command_queue Q, cl_kernel K, const std::string& KN, cl_uint D,
 	             std::vector<size_t>&& IGWO, std::vector<size_t>&& IGWS,
-	             std::vector<size_t>&& ILWS,
+	             std::vector<size_t>&& ILWS, size_t IWGS,
 	             clMemObj&& DH, clMemObj&& LB, clMemObj&& PB,
 	             std::vector<cl_int>&& HM, size_t HO, clEvent&& E, clEvent&& F,
 	             std::chrono::high_resolution_clock::time_point TP)
 	: Queue(Q), Kernel(K), KernelName(KN), WorkDim(D), GWO(std::move(IGWO)),
-	  GWS(std::move(IGWS)), LWS(std::move(ILWS)), DeviceHeader(std::move(DH)),
-	  LocalBuffer(std::move(LB)), PrivateBuffer(std::move(PB)),
+	  GWS(std::move(IGWS)), LWS(std::move(ILWS)), WorkGrpSize(IWGS),
+	  DeviceHeader(std::move(DH)), LocalBuffer(std::move(LB)), PrivateBuffer(std::move(PB)),
 	  HostMetadata(std::move(HM)), HeaderOffset(HO), PrevWork{NULL, std::move(E)},
 	  Final(std::move(F)), LastCall(TP), Counter(0) { }
 
@@ -44,6 +44,7 @@ struct CallbackData {
 	std::vector<size_t> GWO;
 	std::vector<size_t> GWS;
 	std::vector<size_t> LWS;
+	size_t WorkGrpSize;
 
 	// Record so that we can release the resources
 	clMemObj DeviceHeader;

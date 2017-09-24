@@ -364,6 +364,8 @@ cl_int clEnqueueNDRangeKernel(cl_command_queue Queue,
 		NumOfWorkGrp *= GWS[Idx] / RealLWS[Idx];
 		}
 
+	size_t WorkGrpSize = NumOfThread / NumOfWorkGrp;
+
 	// Calculate requested local buffer size, including statically and
 	// dynamically sized local buffer
 	const auto& DynLocSize = (KTEntry->second).DynLocSize;
@@ -472,7 +474,7 @@ cl_int clEnqueueNDRangeKernel(cl_command_queue Queue,
 			GWO ? std::vector<size_t>(GWO, GWO + WorkDim)
 			    : std::vector<size_t>(WorkDim, 0),
 			std::vector<size_t>(GWS, GWS + WorkDim),
-			std::move(RealLWS), std::move(DeviceMetadata),
+			std::move(RealLWS), WorkGrpSize, std::move(DeviceMetadata),
 			std::move(LocalBuffer), std::move(PrivateBuffer),
 			std::move(HostMetadata), DynLocSize.size(),
 			std::move(WriteMetadataEvent), Final.get(),

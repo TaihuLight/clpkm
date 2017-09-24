@@ -63,6 +63,46 @@ void LogEventProfInfo(RuntimeKeeper& RT, cl_event Event) {
 
 	}
 
+// Return true if finished
+template <class I>
+bool UpdateHeader(I First, I Last, size_t WorkGrpSize) {
+	bool Finished = true;
+
+	while (First != Last) {
+		// Rear is the margin of this work group
+		I Rear = First + WorkGrpSize;
+		INTER_ASSERT(Rear <= Last, "gws can't be perfectly divided by lws");
+		// Tag stores the last barrier blocking this work group
+		cl_int Tag = 0;
+		size_t TagCount = 0;
+		// Traverse all work items in this group
+		for (I Front = First; Front < Rear; ++Front) {
+			// This work-item has finished the task
+			if (*Front == 0)
+				continue;
+			Finished = false;
+			// Checkpoint'd due to exceeding time slice
+			if (*Front > 0)
+				continue;
+			// If it's the first work-item in the group being blocked
+			if (Tag == 0)
+				Tag = *Front;
+			// Check if some work-items are blocked by different barrier
+			else
+				INTER_ASSERT(Tag == *Front, "some threads reach different barrier!");
+			++TagCount;
+			}
+		// If all work-items in the groups are being blocking by the same barrier,
+		// let them pass
+		if (TagCount == WorkGrpSize) {
+			for (I Front = First; Front < Rear; ++Front)
+				*Front = -Tag;
+			}
+		First = Rear;
+		}
+	return Finished;
+	}
+
 }
 
 
@@ -151,9 +191,8 @@ void CL_CALLBACK CLPKM::ResumeOrFinish(cl_event Event, cl_int ExecStatus,
 
 	// Step 2
 	// If finished
-	if (std::none_of(Work->HostMetadata.begin() + Work->HeaderOffset,
-	                 Work->HostMetadata.end(),
-	                 [](cl_int S) -> bool { return S; })) {
+	if (UpdateHeader(Work->HostMetadata.begin() + Work->HeaderOffset,
+	                 Work->HostMetadata.end(), Work->WorkGrpSize)) {
 		Ret = Lookup<OclAPI::clSetUserEventStatus>()(Work->Final.get(), CL_COMPLETE);
 		// Note: if the call failed here, following commands are likely to get
 		//       stuck forever...

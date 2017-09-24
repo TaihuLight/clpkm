@@ -45,14 +45,15 @@ size_t __get_group_linear_id(void) {
 }
 void __get_linear_id(size_t * __global_id, size_t * __group_id) {
   uint   __dim = get_work_dim();
-  size_t __gbl_id = 0;
-  size_t __grp_id = 0;
+  size_t __grp_id = 0; // group id
+  size_t __work_grp_sz = 1; // num of work-items in each work group
+  size_t __loc_id = 0; // local id within a work group
   while (__dim-- > 0) {
-    __gbl_id = __gbl_id * get_global_size(__dim) +
-               get_global_id(__dim) - get_global_offset(__dim);
     __grp_id = __grp_id * get_num_groups(__dim) + get_group_id(__dim);
+    __work_grp_sz *= get_local_size(__dim);
+    __loc_id = __loc_id * get_local_size(__dim) + get_local_id(__dim);
   }
-  * __global_id = __gbl_id;
+  * __global_id = __grp_id * __work_grp_sz + __loc_id;
   * __group_id = __grp_id;
 }
 
