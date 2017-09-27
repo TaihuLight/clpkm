@@ -72,6 +72,7 @@ private:
 
 	size_t CostCounter;
 	size_t Nonce;
+	size_t BarrierIdx;
 
 	// A covfefe is a checkpoint/resume code sequence for variables located in
 	// private memory

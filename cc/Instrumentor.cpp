@@ -15,10 +15,10 @@ using namespace clang;
 
 namespace {
 // Helper class to collect info of variables located in local memory
-class LocalDeclVisitor : public RecursiveASTVisitor<LocalDeclVisitor> {
+class FuncInfoCollector : public RecursiveASTVisitor<FuncInfoCollector> {
 public:
-	LocalDeclVisitor(std::vector<DeclStmt*>& LD)
-	: LocDecl(LD) { }
+	FuncInfoCollector(std::vector<DeclStmt*>& LD, size_t& BC)
+	: LocDecl(LD), BarrierCount(BC) { BarrierCount = 0; }
 
 	bool VisitDeclStmt(DeclStmt* DS) {
 		if (DS == nullptr || DS->getDeclGroup().isNull())
@@ -32,8 +32,19 @@ public:
 		return true;
 		}
 
+	bool VisitCallExpr(CallExpr* CE) {
+		if (CE == nullptr || CE->getDirectCallee() == nullptr)
+			return true;
+		if (CE->getDirectCallee()->getNameInfo().getName().getAsString() ==
+		    "barrier")
+			++BarrierCount;
+		return true;
+		}
+
 private:
 	std::vector<DeclStmt*>& LocDecl;
+	size_t& BarrierCount;
+
 	};
 }
 
@@ -103,7 +114,34 @@ bool Instrumentor::VisitCallExpr(CallExpr* CE) {
 	    "barrier")
 		return true;
 
-	// TODO
+	std::string OrigBarrier =
+			TheRewriter.getRewrittenText(CE->getSourceRange());
+
+	std::string BarrierStop =
+			"__clpkm_barrier_stop[" + std::to_string(BarrierIdx++) + "]";
+
+	Covfefe C = GenerateCovfefe(LVT.GenLivenessAfter(CE), ThePL.back());
+	std::string ThisNonce = std::to_string(++Nonce);
+
+	std::string InstCR =
+			" do {\n"
+			"   atomic_dec(&" + BarrierStop + ");\n"
+			"   barrier(CLK_LOCAL_MEM_FENCE);\n"
+			"   if (" + BarrierStop + " != 0) { \n"
+			"     __clpkm_hdr[__clpkm_id] = -" + ThisNonce + ";\n" +
+			      std::move(C.first) +
+			"     goto __CLPKM_SV_LOC_AND_RET;"
+			"   }\n"
+			"   if (__clpkm_loc_id == 0)\n"
+			"   " + BarrierStop + " = __clpkm_grp_size;\n"
+			"   barrier(CLK_LOCAL_MEM_FENCE);\n" +
+			"   " + OrigBarrier + ";\n"
+			"   if (0) case " + ThisNonce + ": {\n" +
+			      std::move(C.second) +
+			"   }\n"
+			" } while (0)";
+
+	TheRewriter.ReplaceText(CE->getSourceRange(), InstCR);
 
 	return true;
 
@@ -210,30 +248,51 @@ bool Instrumentor::TraverseFunctionDecl(FunctionDecl* FuncDecl) {
 		}
 
 	std::vector<DeclStmt*> LocDecl;
+	size_t BarrierCount = 0;
 
-	// Collect local decl
+	// Collect local decl and number of barrier
 	{
-		LocalDeclVisitor V(LocDecl);
+		FuncInfoCollector V(LocDecl, BarrierCount);
 		V.TraverseFunctionDecl(FuncDecl);
 		}
 
 	auto Locfefe = GenerateLocfefe(LocDecl, TheRewriter, FuncDecl, PLEntry);
+
+	auto InitBarrierStop = [&]() -> std::string {
+		if (BarrierCount == 0)
+			return std::string();
+		const std::string StrBarrierCount = std::to_string(BarrierCount);
+		return "  __local uint __clpkm_barrier_stop[" + StrBarrierCount + "];\n"
+		       "  for (size_t __idx = __clpkm_loc_id; "
+		              "__idx < " + StrBarrierCount + "; "
+		              "__idx += __clpkm_grp_size)\n"
+		       "    __clpkm_barrier_stop[__idx] = __clpkm_grp_size;\n";
+		}();
+
+	const char* InitBarrier = (Locfefe.second.size() || InitBarrierStop.size())
+	                          ? "barrier(CLK_LOCAL_MEM_FENCE);" : "";
 
 	// Inject main control flow
 	TheRewriter.InsertTextAfterToken(
 		FuncDecl->getBody()->getLocStart(),
 		"\n  __global const uint* __clpkm_dloc_sz_tbl = (__global uint*) __clpkm_metadata;\n"
 		"  __global int* __clpkm_hdr = __clpkm_metadata + " + std::to_string(PLEntry.LocPtrParamIdx.size()) + ";\n"
-		"  size_t __clpkm_id = 0; // work-item id \n"
+		"  size_t __clpkm_id = 0; // global work-item id \n"
 		"  size_t __clpkm_grp_id = 0; // work-group id \n"
+		"  size_t __clpkm_loc_id = 0; // local work-item id\n"
+		"  size_t __clpkm_grp_size = 0; // work-group size \n"
 		"  uint __clpkm_ctr = 0; // cost counter\n"
 		"  // Compute linear IDs and adjust live value buffer\n"
-		"  __get_linear_id(&__clpkm_id, &__clpkm_grp_id);\n"
+		"  __get_linear_id(&__clpkm_id, &__clpkm_grp_id,\n"
+		"                  &__clpkm_loc_id, &__clpkm_grp_size);\n"
 		"  __clpkm_prv += __clpkm_id * " + ReqPrvSizeVar + ";\n"
 		"  __clpkm_local += __clpkm_grp_id * (" + ReqLocSizeVar + " + " +
 		                                      DynSzLocBufSize + ");\n"
+		"  // Initialize barrier stop\n" +
+		std::move(InitBarrierStop) +
 		"  // Load live values for variables locate in local memory\n" +
 		std::move(Locfefe.second) +
+		InitBarrier +
 		"  switch (__clpkm_hdr[__clpkm_id]) {\n"
 		"  default: goto __CLPKM_SV_LOC_AND_RET;\n"
 		"  case 1: ;\n");
@@ -248,6 +307,7 @@ bool Instrumentor::TraverseFunctionDecl(FunctionDecl* FuncDecl) {
 	LVT.SetContext(FuncDecl);
 	CostCounter = 0;
 	Nonce = 1;
+	BarrierIdx = 0;
 
 	// Traverse
 	bool Ret = RecursiveASTVisitor<Instrumentor>::TraverseFunctionDecl(FuncDecl);
@@ -455,7 +515,7 @@ auto Instrumentor::GenerateLocfefe(std::vector<DeclStmt*>& LocDecl, Rewriter& R,
 	            "   event_t __clpkm_cp_ev = 0; " +
 	            std::move(LC.second) +
 	            "   wait_group_events(1, &__clpkm_cp_ev); "
-	            "   barrier(CLK_LOCAL_MEM_FENCE); } ";
+	            "   } ";
 
 	return LC;
 
