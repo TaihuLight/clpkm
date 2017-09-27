@@ -127,13 +127,14 @@ bool Instrumentor::VisitCallExpr(CallExpr* CE) {
 			" do {\n"
 			"   atomic_dec(&" + BarrierStop + ");\n"
 			"   barrier(CLK_LOCAL_MEM_FENCE);\n"
-			"   if (" + BarrierStop + " != 0) { \n"
+			"   uint __remain_count = " + BarrierStop + ";\n"
+			"   barrier(CLK_LOCAL_MEM_FENCE);\n"
+			"   atomic_inc(&" + BarrierStop + ");\n"
+			"   if (__remain_count != 0) { \n"
 			"     __clpkm_hdr[__clpkm_id] = -" + ThisNonce + ";\n" +
 			      std::move(C.first) +
 			"     goto __CLPKM_SV_LOC_AND_RET;"
 			"   }\n"
-			"   if (__clpkm_loc_id == 0)\n"
-			"   " + BarrierStop + " = __clpkm_grp_size;\n"
 			"   barrier(CLK_LOCAL_MEM_FENCE);\n" +
 			"   " + OrigBarrier + ";\n"
 			"   if (0) case " + ThisNonce + ": {\n" +

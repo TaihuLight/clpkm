@@ -63,10 +63,11 @@ void LogEventProfInfo(RuntimeKeeper& RT, cl_event Event) {
 
 	}
 
-// Return true if finished
+// Return 0 if finished, 1 if yet finished, -1 if yet finished and require
+// updating header
 template <class I>
-bool UpdateHeader(I First, I Last, size_t WorkGrpSize) {
-	bool Finished = true;
+int UpdateHeader(I First, I Last, size_t WorkGrpSize) {
+	int Progress = 0;
 
 	while (First != Last) {
 		// Rear is the margin of this work group
@@ -80,7 +81,7 @@ bool UpdateHeader(I First, I Last, size_t WorkGrpSize) {
 			// This work-item has finished the task
 			if (*Front == 0)
 				continue;
-			Finished = false;
+			Progress |= 1;
 			// Checkpoint'd due to exceeding time slice
 			if (*Front > 0)
 				continue;
@@ -97,10 +98,12 @@ bool UpdateHeader(I First, I Last, size_t WorkGrpSize) {
 		if (TagCount == WorkGrpSize) {
 			for (I Front = First; Front < Rear; ++Front)
 				*Front = -Tag;
+			Progress = -1;
 			}
 		First = Rear;
 		}
-	return Finished;
+
+	return Progress;
 	}
 
 }
@@ -190,9 +193,12 @@ void CL_CALLBACK CLPKM::ResumeOrFinish(cl_event Event, cl_int ExecStatus,
 	LogEventProfInfo(RT, Event);
 
 	// Step 2
+	// Inspect header, summarizing progress
+	int Progress = UpdateHeader(Work->HostMetadata.begin() + Work->HeaderOffset,
+	                            Work->HostMetadata.end(), Work->WorkGrpSize);
+
 	// If finished
-	if (UpdateHeader(Work->HostMetadata.begin() + Work->HeaderOffset,
-	                 Work->HostMetadata.end(), Work->WorkGrpSize)) {
+	if (Progress == 0) {
 		Ret = Lookup<OclAPI::clSetUserEventStatus>()(Work->Final.get(), CL_COMPLETE);
 		// Note: if the call failed here, following commands are likely to get
 		//       stuck forever...
@@ -202,8 +208,28 @@ void CL_CALLBACK CLPKM::ResumeOrFinish(cl_event Event, cl_int ExecStatus,
 		}
 
 	// Step 3
-	// Set up following run
-	MetaEnqueue(Work, 0, nullptr);
+	// If yet finished, setting up following run
+	cl_uint   NumOfWaiting = 0;
+	cl_event* WaitingList = nullptr;
+
+	// If need to update the header
+	if (Progress < 0) {
+
+		cl_int* HostHeader = Work->HostMetadata.data() + Work->HeaderOffset;
+		const size_t HeaderSize = Work->HostMetadata.size() - Work->HeaderOffset;
+
+		Ret = Lookup<OclAPI::clEnqueueWriteBuffer>()(
+				Work->Queue, Work->DeviceHeader.get(), CL_FALSE,
+				Work->HeaderOffset * sizeof(cl_int), HeaderSize * sizeof(cl_int),
+				HostHeader, 0, nullptr, &Work->PrevWork[1].get());
+		OCL_ASSERT(Ret);
+
+		NumOfWaiting = 1;
+		WaitingList = &Work->PrevWork[1].get();
+
+		}
+
+	MetaEnqueue(Work, NumOfWaiting, WaitingList);
 
 	}
 catch (const __ocl_error& OclError) {
