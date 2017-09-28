@@ -11,38 +11,55 @@
 void __clpkm_load_private(__global void * __lvb,
                           __private const void * __dst,
                           size_t __size) {
-  __global char * __clpkm_lvb = (__global char *) __lvb;
-  __private char * __clpkm_dst = (__private char *) __dst;
-  while (__size-- > 0)
-    * __clpkm_dst++ = * __clpkm_lvb++;
+  __global uint * __w_lvb = (__global uint *) __lvb;
+  __private uint * __w_dst = (__private uint *) __dst;
+  while (__size >= 4) {
+    * __w_dst++ = * __w_lvb++;
+    __size -= 4;
+    }
+  __global uchar * __b_lvb = (__global uchar *) __w_lvb;
+  __private uchar * __b_dst = (__private uchar *) __w_dst;
+  switch (__size) {
+  case 3:
+    * __b_dst++ = * __b_lvb++;
+  case 2:
+    * __b_dst++ = * __b_lvb++;
+  case 1:
+    * __b_dst++ = * __b_lvb++;
+  case 0:
+    break;
+  default:
+    __builtin_unreachable();
+  }
 }
 void __clpkm_store_private(__global void * __lvb,
                            __private const void * __src,
                            size_t __size) {
-  __global char * __clpkm_lvb = (__global char *) __lvb;
-  __private char * __clpkm_src = (__private char *) __src;
-  while (__size-- > 0)
-    * __clpkm_lvb++ = * __clpkm_src++;
+  __global uint * __w_lvb = (__global uint *) __lvb;
+  __private uint * __w_src = (__private uint *) __src;
+  while (__size >= 4) {
+    * __w_lvb++ = * __w_src++;
+    __size -= 4;
+  }
+  __global uchar * __b_lvb = (__global uchar *) __w_lvb;
+  __private uchar * __b_src = (__private uchar *) __w_src;
+  switch (__size) {
+  case 3:
+    * __b_lvb++ = * __b_src++;
+  case 2:
+    * __b_lvb++ = * __b_src++;
+  case 1:
+    * __b_lvb++ = * __b_src++;
+  case 0:
+    break;
+  default:
+    __builtin_unreachable();
+  }
 }
 
 //
 // Work related functions
 //
-size_t __get_global_linear_id(void) {
-  uint   __dim = get_work_dim();
-  size_t __id = 0;
-  while (__dim-- > 0)
-    __id = __id * get_global_size(__dim) +
-           get_global_id(__dim) - get_global_offset(__dim);
-  return __id;
-}
-size_t __get_group_linear_id(void) {
-  uint   __dim = get_work_dim();
-  size_t __id = 0;
-  while (__dim-- > 0)
-    __id = __id * get_num_groups(__dim) + get_group_id(__dim);
-  return __id;
-}
 void __get_linear_id(size_t * __global_id, size_t * __group_id,
                      size_t * __local_id, size_t * __group_size) {
   uint   __dim = get_work_dim();
@@ -53,7 +70,6 @@ void __get_linear_id(size_t * __global_id, size_t * __group_id,
     __grp_id = __grp_id * get_num_groups(__dim) + get_group_id(__dim);
     __loc_id = __loc_id * get_local_size(__dim) + get_local_id(__dim);
     __grp_sz = __grp_sz * get_local_size(__dim);
-
   }
   * __global_id  = __grp_id * __grp_sz + __loc_id;
   * __group_id   = __grp_id;
