@@ -10,13 +10,24 @@
 
 #include "clang/Analysis/Analyses/LiveVariables.h"
 #include "clang/Analysis/CFGStmtMap.h"
-#include <unordered_set>
+#include "clang/AST/ASTContext.h"
+#include <set>
 
 
 
 class LiveVarTracker {
 private:
-	using tracker_type = std::unordered_set<clang::VarDecl*>;
+	struct SortBySize {
+		bool operator()(clang::VarDecl* LHS, clang::VarDecl* RHS) const {
+			auto LTI = LHS->getASTContext().getTypeInfo(LHS->getType());
+			auto RTI = RHS->getASTContext().getTypeInfo(RHS->getType());
+			if (LTI.Width != RTI.Width)
+				return LTI.Width > RTI.Width;
+			return LHS < RHS;
+			}
+		};
+
+	using tracker_type = std::set<clang::VarDecl*, SortBySize>;
 	using tracker_iter = tracker_type::iterator;
 
 public:

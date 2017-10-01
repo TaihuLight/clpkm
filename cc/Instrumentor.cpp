@@ -409,6 +409,10 @@ auto Instrumentor::GenerateCovfefe(LiveVarTracker::liveness&& L,
 				const char* VarName = VD->getIdentifier()->getNameStart();
 				size_t Size = (TI.Width + 7) / 8;
 
+				// If it's profitable, pad leading buffer
+				if (Size >= 4)
+					ReqPrvSize = (ReqPrvSize + 3) & ~static_cast<size_t>(0b11);
+
 				std::string P = "(__clpkm_prv+" +
 				                std::to_string(ReqPrvSize) +
 				                ", &" + std::string(VarName) + ", " +
@@ -464,6 +468,7 @@ auto Instrumentor::GenerateLocfefe(std::vector<DeclStmt*>& LocDecl, Rewriter& R,
 			QualType QT = VD->getType();
 			TypeInfo TI = VD->getASTContext().getTypeInfo(QT);
 			size_t Size = (TI.Width + 7) / 8;
+			size_t PaddedSize = (Size + 3) & ~static_cast<size_t>(0b11);
 
 			std::string StrLocArg =
 					"(__local char*)&" +
@@ -479,7 +484,7 @@ auto Instrumentor::GenerateLocfefe(std::vector<DeclStmt*>& LocDecl, Rewriter& R,
 			             ", " + std::move(StrSize) + ", __clpkm_cp_ev); ";
 
 			++NumOfEvent;
-			ReqLocSize += Size;
+			ReqLocSize += PaddedSize;
 
 			}
 		}
