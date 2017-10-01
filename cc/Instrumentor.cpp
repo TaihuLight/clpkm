@@ -117,6 +117,14 @@ bool Instrumentor::VisitCallExpr(CallExpr* CE) {
 	std::string OrigBarrier =
 			TheRewriter.getRewrittenText(CE->getSourceRange());
 
+	// If CLK_LOCAL_MEM_FENCE and CLK_GLOBAL_MEM_FENCE are macro definitions, and
+	// they are made used as the argument of this call,
+	// getRewrittenText(CE->getArg(0)->getSourceRange()) returns empty string
+	const auto RParenLoc = OrigBarrier.find_last_of(')');
+	assert(RParenLoc != std::string::npos);
+	OrigBarrier.replace(OrigBarrier.begin() + RParenLoc, OrigBarrier.end(),
+	                    " | CLK_LOCAL_MEM_FENCE)");
+
 	std::string BarrierStop =
 			"__clpkm_barrier_stop[" + std::to_string(BarrierIdx++) + "]";
 
@@ -135,7 +143,6 @@ bool Instrumentor::VisitCallExpr(CallExpr* CE) {
 			      std::move(C.first) +
 			"     goto __CLPKM_SV_LOC_AND_RET;"
 			"   }\n"
-			"   barrier(CLK_LOCAL_MEM_FENCE);\n" +
 			"   " + OrigBarrier + ";\n"
 			"   if (0) case " + ThisNonce + ": {\n" +
 			      std::move(C.second) +
@@ -270,6 +277,14 @@ bool Instrumentor::TraverseFunctionDecl(FunctionDecl* FuncDecl) {
 		       "    __clpkm_barrier_stop[__idx] = __clpkm_grp_size;\n";
 		}();
 
+	auto InitFinalStop = [&]() -> const char* {
+		if (Locfefe.first.empty())
+			return "";
+		return "  __local uint __clpkm_final_stop;\n"
+		       "  if (__clpkm_loc_id == 0)\n"
+		       "    __clpkm_final_stop = __clpkm_grp_size;\n";
+		}();
+
 	const char* InitBarrier = (Locfefe.second.size() || InitBarrierStop.size())
 	                          ? "barrier(CLK_LOCAL_MEM_FENCE);" : "";
 
@@ -290,7 +305,7 @@ bool Instrumentor::TraverseFunctionDecl(FunctionDecl* FuncDecl) {
 		"  __clpkm_local += __clpkm_grp_id * (" + ReqLocSizeVar + " + " +
 		                                      DynSzLocBufSize + ");\n"
 		"  // Initialize barrier stop\n" +
-		std::move(InitBarrierStop) +
+		std::move(InitBarrierStop) + InitFinalStop +
 		"  // Load live values for variables locate in local memory\n" +
 		std::move(Locfefe.second) +
 		InitBarrier +
@@ -457,8 +472,8 @@ auto Instrumentor::GenerateLocfefe(std::vector<DeclStmt*>& LocDecl, Rewriter& R,
 					"__clpkm_local + " + std::to_string(ReqLocSize);
 			std::string StrSize = std::to_string(Size);
 
-			LC.first += "__clpkm_cp_ev = async_work_group_copy(" + StrGblArg +
-			            ", " + StrLocArg + ", " + StrSize + ", __clpkm_cp_ev); ";
+			LC.first += "__clpkm_store_local(" + StrGblArg +
+			            ", " + StrLocArg + ", " + StrSize + ", __clpkm_exit_id, __clpkm_batch_sz); ";
 			LC.second += "__clpkm_cp_ev = async_work_group_copy(" +
 			             std::move(StrLocArg) + ", " + std::move(StrGblArg) +
 			             ", " + std::move(StrSize) + ", __clpkm_cp_ev); ";
@@ -486,9 +501,9 @@ auto Instrumentor::GenerateLocfefe(std::vector<DeclStmt*>& LocDecl, Rewriter& R,
 							FD->getParamDecl(ParamIdx)->getIdentifier()->getNameStart());
 			std::string StrSize = "__clpkm_dloc_sz_tbl[" + std::to_string(IdxAcc) + "]";
 
-			LC.first += "__clpkm_cp_ev = async_work_group_copy("
+			LC.first += "__clpkm_store_local("
 			            "__clpkm_local + __clpkm_dloc_offset, " +
-			            StrLocArg + ", " + StrSize + ", __clpkm_cp_ev); "
+			            StrLocArg + ", " + StrSize + ", __clpkm_exit_id, __clpkm_batch_sz); "
 			            "__clpkm_dloc_offset += " + StrSize + "; ";
 			LC.second += "__clpkm_cp_ev = async_work_group_copy(" +
 			             std::move(StrLocArg) + ", "
@@ -506,10 +521,13 @@ auto Instrumentor::GenerateLocfefe(std::vector<DeclStmt*>& LocDecl, Rewriter& R,
 		return Locfefe();
 
 	// Sync before store to live value buffer
-	LC.first = " barrier(CLK_LOCAL_MEM_FENCE);"
-	           " event_t __clpkm_cp_ev = 0; " +
-	           std::move(LC.first) +
-	           " wait_group_events(1, &__clpkm_cp_ev); ";
+	LC.first = " uint __clpkm_batch_sz = __clpkm_final_stop; "
+	           " barrier(CLK_LOCAL_MEM_FENCE);"
+	           " uint __clpkm_exit_id = atomic_dec(&__clpkm_final_stop) - 1;"
+	           " barrier(CLK_LOCAL_MEM_FENCE);"
+	           " if (__clpkm_final_stop != 0)"
+	           "   return;" +
+	           std::move(LC.first);
 
 	LC.second = std::move(Decl) +
 	            " if (__clpkm_hdr[__clpkm_id] != 1) { "

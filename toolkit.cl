@@ -56,6 +56,33 @@ void __clpkm_store_private(__global void * __lvb,
     __builtin_unreachable();
   }
 }
+void __clpkm_store_local(__global void * __lvb, __local const void * __src,
+                         size_t __size, size_t __loc_id, size_t __batch_size) {
+  __global uint * __w_lvb = ((__global uint *) __lvb) + __loc_id;
+  __local uint * __w_src = ((__local uint *) __src) + __loc_id;
+  __local uchar * __b_last = ((__local uchar *) __src) + __size;
+  // This loop keeps running until there are less than 4 bytes left
+  while (((__local uchar *) __w_src) + 4 <= __b_last) {
+    * __w_lvb = * __w_src;
+    __w_lvb += __batch_size;
+    __w_src += __batch_size;
+  }
+  __global uchar * __b_lvb = (__global uchar *) __w_lvb;
+  __local uchar * __b_src = (__local uchar *) __w_src;
+  if (__b_src < __b_last) {
+    switch (__b_last - __b_src) {
+    case 3:
+      * __b_lvb++ = * __b_src++;
+    case 2:
+      * __b_lvb++ = * __b_src++;
+    case 1:
+      * __b_lvb++ = * __b_src++;
+      break;
+    default:
+      __builtin_unreachable();
+    }
+  }
+}
 
 //
 // Work related functions
