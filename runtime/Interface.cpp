@@ -481,7 +481,7 @@ cl_int clEnqueueNDRangeKernel(cl_command_queue Queue,
 			std::chrono::high_resolution_clock::now());
 
 	// This throws exception on error
-	MetaEnqueue(Work.get(), NumOfWaiting + 1, NewWaitingList.data());
+	MetaEnqueue(Work.get(), NewWaitingList.size(), NewWaitingList.data());
 
 	Ret = Lookup<OclAPI::clEnqueueMarkerWithWaitList>()(Queue, 1, &Final.get(),
 	                                                    Event);
