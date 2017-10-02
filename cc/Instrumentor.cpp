@@ -409,17 +409,25 @@ auto Instrumentor::GenerateCovfefe(LiveVarTracker::liveness&& L,
 				const char* VarName = VD->getIdentifier()->getNameStart();
 				size_t Size = (TI.Width + 7) / 8;
 
-				// If it's profitable, pad leading buffer
-				if (Size >= 4)
-					ReqPrvSize = (ReqPrvSize + 3) & ~static_cast<size_t>(0b11);
+				const char* MemcpyStore = "__clpkm_store_private";
+				const char* MemcpyLoad = "__clpkm_load_private";
+
+				if (TI.Align >= 32) {
+					MemcpyStore = "__clpkm_store_private_align_4";
+					MemcpyLoad = "__clpkm_load_private_align_4";
+					}
+				else if (TI.Align >= 16) {
+					MemcpyStore = "__clpkm_store_private_align_2";
+					MemcpyLoad = "__clpkm_load_private_align_2";
+					}
 
 				std::string P = "(__clpkm_prv+" +
 				                std::to_string(ReqPrvSize) +
 				                ", &" + std::string(VarName) + ", " +
 				                std::to_string(Size) + "); ";
-				C.first += "__clpkm_store_private";
+				C.first += MemcpyStore;
 				C.first += P;
-				C.second += "__clpkm_load_private";
+				C.second += MemcpyLoad;
 				C.second += std::move(P);
 				ReqPrvSize += Size;
 
@@ -437,6 +445,9 @@ auto Instrumentor::GenerateCovfefe(LiveVarTracker::liveness&& L,
 			}
 
 		}
+
+	// Pad to multiple of 4
+	ReqPrvSize = (ReqPrvSize + 3) & ~static_cast<size_t>(0b11);
 
 	// Update max requested size
 	KP.ReqPrvSize = std::max(KP.ReqPrvSize, ReqPrvSize);

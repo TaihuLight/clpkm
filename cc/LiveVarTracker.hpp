@@ -21,8 +21,8 @@ private:
 		bool operator()(clang::VarDecl* LHS, clang::VarDecl* RHS) const {
 			auto LTI = LHS->getASTContext().getTypeInfo(LHS->getType());
 			auto RTI = RHS->getASTContext().getTypeInfo(RHS->getType());
-			if (LTI.Width != RTI.Width)
-				return LTI.Width > RTI.Width;
+			if (LTI.Align != RTI.Align)
+				return LTI.Align > RTI.Align;
 			return LHS < RHS;
 			}
 		};

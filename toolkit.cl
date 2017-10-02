@@ -8,54 +8,70 @@
 //
 // Memory copy functions
 //
-void __clpkm_load_private(__global void * __lvb,
-                          __private const void * __dst,
-                          size_t __size) {
+void __clpkm_load_private_align_4(__global void * __lvb,
+                                  __private const void * __dst,
+                                  size_t __size) {
+  // OpenCL 1.2 §6.3.k: The sizeof operator yields the size (in bytes) of its
+  // operand, including any padding bytes needed for alignment
+  // So I think if the alignment is 4, the size must be multiple of 4
   __global uint * __w_lvb = (__global uint *) __lvb;
   __private uint * __w_dst = (__private uint *) __dst;
   while (__size >= 4) {
     * __w_dst++ = * __w_lvb++;
     __size -= 4;
-    }
-  __global uchar * __b_lvb = (__global uchar *) __w_lvb;
-  __private uchar * __b_dst = (__private uchar *) __w_dst;
-  switch (__size) {
-  case 3:
-    * __b_dst++ = * __b_lvb++;
-  case 2:
-    * __b_dst++ = * __b_lvb++;
-  case 1:
-    * __b_dst++ = * __b_lvb++;
-  case 0:
-    break;
-  default:
-    __builtin_unreachable();
   }
 }
-void __clpkm_store_private(__global void * __lvb,
-                           __private const void * __src,
-                           size_t __size) {
+void __clpkm_store_private_align_4(__global void * __lvb,
+                                   __private const void * __src,
+                                   size_t __size) {
   __global uint * __w_lvb = (__global uint *) __lvb;
   __private uint * __w_src = (__private uint *) __src;
   while (__size >= 4) {
     * __w_lvb++ = * __w_src++;
     __size -= 4;
   }
-  __global uchar * __b_lvb = (__global uchar *) __w_lvb;
-  __private uchar * __b_src = (__private uchar *) __w_src;
-  switch (__size) {
-  case 3:
-    * __b_lvb++ = * __b_src++;
-  case 2:
-    * __b_lvb++ = * __b_src++;
-  case 1:
-    * __b_lvb++ = * __b_src++;
-  case 0:
-    break;
-  default:
-    __builtin_unreachable();
+}
+void __clpkm_load_private_align_2(__global void * __lvb,
+                                  __private const void * __dst,
+                                  size_t __size) {
+  __global ushort * __w_lvb = (__global ushort *) __lvb;
+  __private ushort * __w_dst = (__private ushort *) __dst;
+  while (__size >= 2) {
+    * __w_dst++ = * __w_lvb++;
+    __size -= 2;
   }
 }
+void __clpkm_store_private_align_2(__global void * __lvb,
+                                   __private const void * __src,
+                                   size_t __size) {
+  __global ushort * __w_lvb = (__global ushort *) __lvb;
+  __private ushort * __w_src = (__private ushort *) __src;
+  while (__size >= 2) {
+    * __w_lvb++ = * __w_src++;
+    __size -= 2;
+  }
+}
+void __clpkm_load_private(__global void * __lvb,
+                          __private const void * __dst,
+                          size_t __size) {
+  __global uchar * __w_lvb = (__global uchar *) __lvb;
+  __private uchar * __w_dst = (__private uchar *) __dst;
+  while (__size > 0) {
+    * __w_dst++ = * __w_lvb++;
+    --__size;
+  }
+}
+void __clpkm_store_private(__global void * __lvb,
+                           __private const void * __src,
+                           size_t __size) {
+  __global uchar * __w_lvb = (__global uchar *) __lvb;
+  __private uchar * __w_src = (__private uchar *) __src;
+  while (__size > 0) {
+    * __w_lvb++ = * __w_src++;
+    --__size;
+  }
+}
+// XXX: assumption: __local variables are always 4-aligned
 void __clpkm_store_local(__global void * __lvb, __local const void * __src,
                          size_t __size, size_t __loc_id, size_t __batch_size) {
   __global uint * __w_lvb = ((__global uint *) __lvb) + __loc_id;
