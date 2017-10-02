@@ -590,14 +590,14 @@ cl_int clSetKernelArg(cl_kernel Kernel, cl_uint ArgIndex, size_t ArgSize,
 	                                  DynLocParams.end(),
 	                                  ArgIndex);
 
+	// Pad to multiple of 4
+	ArgSize = (ArgSize + 3) & ~static_cast<size_t>(0b11);
+
 	cl_int Ret = Lookup<OclAPI::clSetKernelArg>()(Kernel, ArgIndex, ArgSize,
 	                                              ArgValue);
 
 	if (It == DynLocParams.end() || *It != ArgIndex || Ret != CL_SUCCESS)
 		return Ret;
-
-	// Pad to multiple of 4
-	ArgSize = (ArgSize + 3) & ~static_cast<size_t>(0b11);
 
 	// Only record the value on success
 	size_t TblIdx = It - DynLocParams.begin();
