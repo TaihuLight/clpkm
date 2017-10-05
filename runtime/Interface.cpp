@@ -196,7 +196,7 @@ cl_int clBuildProgram(cl_program Program,
 	if (!CLPKM::Compile(Source, Options, PL)) {
 
 		// Build log is put in source
-		ProgramInfo NewEntry(NULL, std::move(Source), ProfileList());
+		ProgramInfo NewEntry(Context, NULL, std::move(Source), ProfileList());
 
 		boost::unique_lock<boost::upgrade_mutex> Lock(RT.getPTLock());
 		const auto It = PT.emplace(Program, std::move(NewEntry));
@@ -218,7 +218,8 @@ cl_int clBuildProgram(cl_program Program,
 
 	clProgram ShadowProgram = RawShadowProgram;
 
-	ProgramInfo NewEntry(std::move(ShadowProgram), std::string(), std::move(PL));
+	ProgramInfo NewEntry(Context, std::move(ShadowProgram), std::string(),
+	                     std::move(PL));
 
 	boost::unique_lock<boost::upgrade_mutex> Lock(RT.getPTLock());
 	const auto It = PT.emplace(Program, std::move(NewEntry));
@@ -238,7 +239,7 @@ catch (const std::bad_alloc& ) {
 	return CL_OUT_OF_HOST_MEMORY;
 	}
 
-cl_kernel clCreateKernel(cl_program Program, const char* Name, cl_int* Ret) {
+cl_kernel clCreateKernel(cl_program Program, const char* Name, cl_int* Ret) try {
 
 	auto& RT = getRuntimeKeeper();
 	auto& PT = RT.getProgramTable();
@@ -269,23 +270,43 @@ cl_kernel clCreateKernel(cl_program Program, const char* Name, cl_int* Ret) {
 		return NULL;
 		}
 
-	cl_kernel Kernel = Lookup<OclAPI::clCreateKernel>()(
-			It->second.ShadowProgram.get(), Name, Ret);
+	auto& ProgInfo = It->second;
+	cl_context Context = ProgInfo.Context;
+	cl_program ShadowProg = ProgInfo.ShadowProgram.get();
 
-	if (Kernel != NULL) {
-		KernelInfo NewInfo(std::string(Name), &(*Pos),
-		                   std::vector<cl_uint>(Pos->LocPtrParamIdx.size(), 0));
-		boost::unique_lock<boost::upgrade_mutex> WrLock(RT.getKTLock());
-		const auto& It = RT.getKernelTable().emplace(Kernel, std::move(NewInfo));
-		INTER_ASSERT(It.second, "insertion to kernel table didn't table place");
-		}
+	// Try to create the first kernel so we can report error early
+	clKernel FirstKernel = Lookup<OclAPI::clCreateKernel>()(ShadowProg, Name,
+	                                                        Ret);
 
-	return Kernel;
+	// Creation failed
+	if (!FirstKernel)
+		return NULL;
 
+	auto NewInfo = std::make_unique<KernelInfo>(Context, ShadowProg, &(*Pos));
+	auto* RawInfo = NewInfo.get();
+
+	// Put the first kernel into the pool
+	(RawInfo->Pool).emplace_back(std::move(FirstKernel));
+
+	boost::unique_lock<boost::upgrade_mutex> WrLock(RT.getKTLock());
+
+	const auto& KTIt = RT.getKernelTable().emplace(RawInfo);
+	INTER_ASSERT(KTIt.second, "insertion to kernel table didn't table place");
+
+	NewInfo.release();
+
+	// cl_kernel is a pointer type
+	return reinterpret_cast<cl_kernel>(RawInfo);
+
+	}
+catch (const std::bad_alloc& ) {
+	if (Ret != nullptr)
+		*Ret = CL_OUT_OF_HOST_MEMORY;
+	return NULL;
 	}
 
 cl_int clEnqueueNDRangeKernel(cl_command_queue Queue,
-                              cl_kernel Kernel,
+                              cl_kernel K,
                               cl_uint WorkDim,
                               const size_t* GWO,
                               const size_t* GWS,
@@ -294,6 +315,8 @@ cl_int clEnqueueNDRangeKernel(cl_command_queue Queue,
                               const cl_event* WaitingList,
                               cl_event* Event) try {
 
+	KernelInfo* KI = reinterpret_cast<KernelInfo*>(K);
+
 	auto& RT = getRuntimeKeeper();
 	auto& QT = RT.getQueueTable();
 	auto& KT = RT.getKernelTable();
@@ -301,9 +324,9 @@ cl_int clEnqueueNDRangeKernel(cl_command_queue Queue,
 	boost::shared_lock<boost::upgrade_mutex> QTLock(RT.getQTLock());
 	boost::shared_lock<boost::upgrade_mutex> KTLock(RT.getKTLock());
 	const auto QueueEntry = QT.find(Queue);
-	const auto KTEntry = KT.find(Kernel);
+	const auto KTEntry = KT.find(KI);
 
-	// Step 0
+	// Step 0 - 1
 	// Pre-check
 	if (QueueEntry == QT.end())
 		return CL_INVALID_COMMAND_QUEUE;
@@ -316,21 +339,31 @@ cl_int clEnqueueNDRangeKernel(cl_command_queue Queue,
 
 	// FIXME: Shall we also lock ProgramTable?
 	auto& QueueInfo = QueueEntry->second;
-	auto& Profile = *(KTEntry->second).Profile;
+	auto& KernelInfo = *KI;
+	auto& Profile = *KernelInfo.Profile;
 	cl_int Ret = CL_SUCCESS;
 
-	// Check whether the kernel and queue are in the same context
-	{
-		cl_context   Context;
+	if (KernelInfo.Context != QueueInfo.Context)
+		return CL_INVALID_CONTEXT;
 
-		Ret = Lookup<OclAPI::clGetKernelInfo>()(
-				Kernel, CL_KERNEL_CONTEXT, sizeof(Context), &Context, nullptr);
-		OCL_ASSERT(Ret);
+	// Step 0 - 2
+	// Prep Kernel
+	clKernel KernelWrap = NULL;
+	std::unique_lock<std::mutex> PoolLock(*KernelInfo.Mutex);
+	size_t PoolSize = KernelInfo.Pool.size();
 
-		if (Context != QueueInfo.Context)
-			return CL_INVALID_CONTEXT;
-
+	if (PoolSize > 0) {
+		KernelWrap = std::move(KernelInfo.Pool.back());
+		KernelInfo.Pool.pop_back();
 		}
+	else {
+		KernelWrap = Lookup<OclAPI::clCreateKernel>()(
+				KernelInfo.Program, Profile.Name.c_str(), &Ret);
+		OCL_ASSERT(Ret);
+		}
+
+	cl_kernel Kernel = KernelWrap.get();
+	PoolLock.unlock();
 
 	cl_uint MaxDim = 0;
 
@@ -368,20 +401,22 @@ cl_int clEnqueueNDRangeKernel(cl_command_queue Queue,
 
 	// Calculate requested local buffer size, including statically and
 	// dynamically sized local buffer
-	const auto& DynLocSize = (KTEntry->second).DynLocSize;
-	const size_t TotalReqLocSize = std::accumulate(DynLocSize.begin(),
-	                                               DynLocSize.end(),
-	                                               0) + Profile.ReqLocSize;
-	size_t MetadataSize = (DynLocSize.size() + NumOfThread) * sizeof(cl_int);
+	const size_t NumOfDynLocParam = Profile.LocPtrParamIdx.size();
+	size_t TotalReqLocSize = Profile.ReqLocSize;
+
+	for (auto ParamIdx : Profile.LocPtrParamIdx)
+		TotalReqLocSize += KernelInfo.Args[ParamIdx].first;
+
+	size_t MetadataSize = (NumOfDynLocParam + NumOfThread) * sizeof(cl_int);
 
 	RT.Log(RuntimeKeeper::loglevel::INFO,
-	       "\n==CLPKM== Launch kernel %p (%s)\n"
+	       "\n==CLPKM== Enqueue kernel %p (%s, %s)\n"
 	       "==CLPKM==   metadata:  %s [4 Bytes x (%zu DSLB + %zu work-items)]\n"
 	       "==CLPKM==   __private: %s [%zu Bytes x %zu work-items]\n"
 	       "==CLPKM==   __local:   %s [%zu Bytes x %zu work-groups]\n",
-	       Kernel, (KTEntry->second).Name.c_str(),
+	       Kernel, Profile.Name.c_str(), (PoolSize > 0) ? "pooled" : "new",
 	       ToHumanReadable(MetadataSize).c_str(),
-	       DynLocSize.size(), NumOfThread,
+	       NumOfDynLocParam, NumOfThread,
 	       ToHumanReadable(Profile.ReqPrvSize * NumOfThread).c_str(),
 	       Profile.ReqPrvSize, NumOfThread,
 	       ToHumanReadable(TotalReqLocSize * NumOfWorkGrp).c_str(),
@@ -418,12 +453,14 @@ cl_int clEnqueueNDRangeKernel(cl_command_queue Queue,
 	auto venEnqWrBuf = Lookup<OclAPI::clEnqueueWriteBuffer>();
 
 	// cl_int, i.e. signed 2's complement 32-bit integer, shall suffice
-	std::vector<cl_int> HostMetadata(DynLocSize.size() + NumOfThread, 1);
+	std::vector<cl_int> HostMetadata(NumOfDynLocParam + NumOfThread, 1);
 	clEvent WriteMetadataEvent(NULL);
 
 	// Prepare size info for dynamically sized local buffer
-	for (size_t Idx = 0; Idx < DynLocSize.size(); ++Idx)
-		HostMetadata[Idx] = reinterpret_cast<const cl_int&>(DynLocSize[Idx]);
+	for (size_t Idx = 0; Idx < NumOfDynLocParam; ++Idx) {
+		HostMetadata[Idx] = reinterpret_cast<const cl_int&>(
+				KernelInfo.Args[Profile.LocPtrParamIdx[Idx]]);
+		}
 
 	// Write metadata and put the event to the end of NewWaitingList
 	Ret = venEnqWrBuf(QueueInfo.ShadowQueue.get(), DeviceMetadata.get(), CL_FALSE,
@@ -442,9 +479,14 @@ cl_int clEnqueueNDRangeKernel(cl_command_queue Queue,
 		NewWaitingList.emplace_back(QueueInfo.TaskBlocker.get());
 
 	// Step 4
-	// Set up additional CLPKM-related kernel arguments
+	// Set up  kernel arguments
 	auto venSetKernelArg = Lookup<OclAPI::clSetKernelArg>();
-	auto Idx = Profile.NumOfParam;
+	unsigned Idx = 0;
+
+	for (const auto& KArg : KernelInfo.Args) {
+		Ret = venSetKernelArg(Kernel, Idx++, KArg.first, KArg.second);
+		OCL_ASSERT(Ret);
+		}
 
 	cl_uint Threshold = RT.getCRThreshold();
 
@@ -470,13 +512,13 @@ cl_int clEnqueueNDRangeKernel(cl_command_queue Queue,
 
 	// New callback
 	auto Work = std::make_unique<CallbackData>(
-			QueueInfo.ShadowQueue.get(), Kernel, (KTEntry->second).Name, WorkDim,
-			GWO ? std::vector<size_t>(GWO, GWO + WorkDim)
-			    : std::vector<size_t>(WorkDim, 0),
+			QueueInfo.ShadowQueue.get(), std::move(KernelWrap), KI,
+			WorkDim, GWO ? std::vector<size_t>(GWO, GWO + WorkDim)
+			             : std::vector<size_t>(WorkDim, 0),
 			std::vector<size_t>(GWS, GWS + WorkDim),
 			std::move(RealLWS), WorkGrpSize, std::move(DeviceMetadata),
 			std::move(LocalBuffer), std::move(PrivateBuffer),
-			std::move(HostMetadata), DynLocSize.size(),
+			std::move(HostMetadata), NumOfDynLocParam,
 			std::move(WriteMetadataEvent), Final.get(),
 			std::chrono::high_resolution_clock::now());
 
@@ -491,9 +533,10 @@ cl_int clEnqueueNDRangeKernel(cl_command_queue Queue,
 		QueueInfo.TaskBlocker = std::move(Final);
 
 	// Prevent it from being released
+	KernelWrap.get() = NULL;
 	Work.release();
 
-	return Ret;
+	return clFinish(Queue);
 
 	}
 catch (const __ocl_error& OclError) {
@@ -503,33 +546,57 @@ catch (const std::bad_alloc& ) {
 	return CL_OUT_OF_HOST_MEMORY;
 	}
 
-cl_int clReleaseKernel(cl_kernel Kernel) {
+cl_int clRetainKernel(cl_kernel K) {
+
+	KernelInfo* KI = reinterpret_cast<KernelInfo*>(K);
+
+	auto& RT = getRuntimeKeeper();
+	auto& KT = RT.getKernelTable();
+
+	boost::shared_lock<boost::upgrade_mutex> RdLock(RT.getKTLock());
+	const auto It = KT.find(KI);
+
+	if (It == KT.end())
+		return CL_INVALID_KERNEL;
+
+	std::lock_guard<std::mutex> Lock(*KI->Mutex);
+
+	++(KI->RefCount);
+
+	return CL_SUCCESS;
+
+	}
+
+cl_int clReleaseKernel(cl_kernel K) {
+
+	KernelInfo* KI = reinterpret_cast<KernelInfo*>(K);
 
 	auto& RT = getRuntimeKeeper();
 	auto& KT = RT.getKernelTable();
 
 	boost::upgrade_lock<boost::upgrade_mutex> RdLock(RT.getKTLock());
-	const auto It = KT.find(Kernel);
+	const auto It = KT.find(KI);
 
 	if (It == KT.end())
 		return CL_INVALID_KERNEL;
 
-	// Avoid from getting old reference count
-	static std::mutex Mutex;
-	std::lock_guard<std::mutex> Lock(Mutex);
+	std::unique_lock<std::mutex> KILock(*KI->Mutex);
 
-	cl_uint RefCount = 0;
+	if (--(KI->RefCount) > 0)
+		return CL_SUCCESS;
 
-	cl_int Ret = Lookup<OclAPI::clGetKernelInfo>()(
-			Kernel, CL_KERNEL_REFERENCE_COUNT, sizeof(cl_uint), &RefCount, nullptr);
-	OCL_ASSERT(Ret);
+	// If the reference count is 0
+	// Is deadlock possible here?
+	boost::upgrade_to_unique_lock<boost::upgrade_mutex> WrLock(RdLock);
 
-	if (RefCount <= 1) {
-		boost::upgrade_to_unique_lock<boost::upgrade_mutex> WrLock(RdLock);
-		KT.erase(It);
-		}
+	// Unlock and disassociate the mutex
+	KILock.unlock();
+	KILock.release();
 
-	return Lookup<OclAPI::clReleaseKernel>()(Kernel);
+	delete KI;
+	KT.erase(It);
+
+	return CL_SUCCESS;
 
 	}
 
@@ -569,19 +636,26 @@ catch (const __ocl_error& OclError) {
 	return OclError;
 	}
 
-cl_int clSetKernelArg(cl_kernel Kernel, cl_uint ArgIndex, size_t ArgSize,
+cl_int clSetKernelArg(cl_kernel K, cl_uint ArgIndex, size_t ArgSize,
                       const void* ArgValue) {
+
+	KernelInfo* KI = reinterpret_cast<KernelInfo*>(K);
 
 	auto& RT = getRuntimeKeeper();
 	auto& KT = RT.getKernelTable();
 
 	boost::shared_lock<boost::upgrade_mutex> KTLock(RT.getKTLock());
-	const auto& KTEntry = KT.find(Kernel);
+	const auto& KTEntry = KT.find(KI);
 
 	if (KTEntry == KT.end())
 		return CL_INVALID_KERNEL;
 
-	const auto& DynLocParams = (KTEntry->second).Profile->LocPtrParamIdx;
+	auto& KIArgs = KI->Args;
+
+	if (ArgIndex >= KIArgs.size())
+		return CL_INVALID_ARG_INDEX;
+
+	const auto& DynLocParams = KI->Profile->LocPtrParamIdx;
 
 	// If the argument is a dynamically sized local buffer, ArgIndex should be in
 	// DynLocParams
@@ -590,21 +664,21 @@ cl_int clSetKernelArg(cl_kernel Kernel, cl_uint ArgIndex, size_t ArgSize,
 	                                  DynLocParams.end(),
 	                                  ArgIndex);
 
-	// Pad to multiple of 4
-	ArgSize = (ArgSize + 3) & ~static_cast<size_t>(0b11);
+	// If this is a DSLB
+	if (It != DynLocParams.end() && *It == ArgIndex) {
+		if (ArgValue != NULL)
+			return CL_INVALID_ARG_VALUE;
+		// Pad to multiple of 4
+		ArgSize = (ArgSize + 3) & ~static_cast<size_t>(0b11);
+		INTER_ASSERT(static_cast<cl_uint>(ArgSize) == ArgSize,
+		             "cl_uint cannot hold %zu", ArgSize);
+		}
+	// This is NOT a DSLB
+	else if (ArgValue == NULL)
+		return CL_INVALID_ARG_VALUE;
 
-	cl_int Ret = Lookup<OclAPI::clSetKernelArg>()(Kernel, ArgIndex, ArgSize,
-	                                              ArgValue);
-
-	if (It == DynLocParams.end() || *It != ArgIndex || Ret != CL_SUCCESS)
-		return Ret;
-
-	// Only record the value on success
-	size_t TblIdx = It - DynLocParams.begin();
-	(KTEntry->second).DynLocSize[TblIdx] = ArgSize;
-
-	INTER_ASSERT((KTEntry->second).DynLocSize[TblIdx] == ArgSize,
-	             "cl_uint cannot hold %zu", ArgSize);
+	KIArgs[ArgIndex].first = ArgSize;
+	KIArgs[ArgIndex].second = ArgValue;
 
 	return CL_SUCCESS;
 

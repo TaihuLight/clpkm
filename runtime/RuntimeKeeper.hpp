@@ -18,6 +18,8 @@
 #include <mutex>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
+#include <utility>
 
 #include <boost/thread/shared_mutex.hpp>
 #include <CL/opencl.h>
@@ -42,23 +44,32 @@ struct QueueInfo {
 	};
 
 struct ProgramInfo {
+	cl_context  Context;
 	clProgram   ShadowProgram;
 	std::string BuildLog;
 	ProfileList KernelProfileList;
 
-	ProgramInfo(clProgram&& P, std::string&& BL, ProfileList&& PL)
-	: ShadowProgram(std::move(P)), BuildLog(std::move(BL)),
+	ProgramInfo(cl_context C, clProgram&& P, std::string&& BL, ProfileList&& PL)
+	: Context(C), ShadowProgram(std::move(P)), BuildLog(std::move(BL)),
 	  KernelProfileList(std::move(PL)) { }
 	};
 
 struct KernelInfo {
-	const std::string    Name;
-	const KernelProfile* Profile;
-	std::vector<cl_uint> DynLocSize;
+	using karg_t = std::pair<size_t, const void*>;
 
-	KernelInfo(std::string&& N, const KernelProfile* KP,
-	           std::vector<cl_uint>&& DLS)
-	: Name(std::move(N)), Profile(KP), DynLocSize(std::move(DLS)) { }
+	cl_context           Context;
+	cl_program           Program;
+	const KernelProfile* Profile;
+	std::vector<karg_t>  Args;
+
+	std::vector<clKernel>       Pool;
+	size_t                      RefCount;
+	std::unique_ptr<std::mutex> Mutex;
+
+	KernelInfo(cl_context C, cl_program P, const KernelProfile* KP)
+	: Context(C), Program(P), Profile(KP),
+	  Args(KP->NumOfParam, karg_t(0, nullptr)), RefCount(1),
+	  Mutex(std::make_unique<std::mutex>()) { }
 	};
 
 struct EventLog {
@@ -70,7 +81,7 @@ struct EventLog {
 
 using QueueTable = std::unordered_map<cl_command_queue, QueueInfo>;
 using ProgramTable = std::unordered_map<cl_program, ProgramInfo>;
-using KernelTable = std::unordered_map<cl_kernel, KernelInfo>;
+using KernelTable = std::unordered_set<KernelInfo*>;
 using EventLogger = std::unordered_map<cl_event, EventLog>;
 using tlv_t = cl_uint;
 

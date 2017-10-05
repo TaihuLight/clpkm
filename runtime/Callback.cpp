@@ -106,6 +106,21 @@ int UpdateHeader(I First, I Last, size_t WorkGrpSize) {
 	return Progress;
 	}
 
+void CallbackCleanup(CallbackData* Work) {
+
+	KernelInfo& KInfo = *Work->KInfo;
+
+	std::unique_lock<std::mutex> Lock(*KInfo.Mutex);
+
+	KInfo.Pool.emplace_back(std::move(Work->Kernel));
+
+	Lock.unlock();
+	Lock.release();
+
+	delete Work;
+
+	}
+
 }
 
 
@@ -117,7 +132,7 @@ void CLPKM::MetaEnqueue(CallbackData* Work, cl_uint NumWaiting,
 
 	// Enqueue kernel and read data
 	cl_int Ret = Lookup<OclAPI::clEnqueueNDRangeKernel>()(
-			Work->Queue, Work->Kernel, Work->WorkDim, Work->GWO.data(),
+			Work->Queue, Work->Kernel.get(), Work->WorkDim, Work->GWO.data(),
 			Work->GWS.data(), Work->LWS.data(), NumWaiting, WaitingList,
 			&Work->PrevWork[0].get());
 	OCL_ASSERT(Ret);
@@ -163,7 +178,7 @@ void CL_CALLBACK CLPKM::ResumeOrFinish(cl_event Event, cl_int ExecStatus,
 	RT.Log(RuntimeKeeper::loglevel::INFO,
 	       "\n==CLPKM== Callback called on kernel %p (%s) run #%u\n"
 	       "==CLPKM==   interval between last call %f ms\n",
-	       Work->Kernel, Work->KernelName.c_str(),
+	       Work->Kernel.get(), Work->KInfo->Profile->Name.c_str(),
 	       ++Work->Counter,
 	       Interval.count());
 	Work->LastCall = Now;
@@ -203,7 +218,7 @@ void CL_CALLBACK CLPKM::ResumeOrFinish(cl_event Event, cl_int ExecStatus,
 		// Note: if the call failed here, following commands are likely to get
 		//       stuck forever...
 		INTER_ASSERT(Ret == CL_SUCCESS, "failed to set user event status");
-		delete Work;
+		CallbackCleanup(Work);
 		return;
 		}
 
@@ -237,5 +252,5 @@ catch (const __ocl_error& OclError) {
 	cl_int Ret = Lookup<OclAPI::clSetUserEventStatus>()(
 			Work->Final.get(), OclError);
 	INTER_ASSERT(Ret == CL_SUCCESS, "failed to set user event status");
-	delete Work;
+	CallbackCleanup(Work);
 	}

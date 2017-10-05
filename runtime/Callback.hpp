@@ -9,6 +9,7 @@
 #define __CLPKM__CALLBACK_HPP__
 
 #include "ResourceGuard.hpp"
+#include "RuntimeKeeper.hpp"
 #include <chrono>
 #include <string>
 #include <vector>
@@ -22,22 +23,22 @@ struct CallbackData {
 
 	CallbackData() = delete;
 
-	CallbackData(cl_command_queue Q, cl_kernel K, const std::string& KN, cl_uint D,
+	CallbackData(cl_command_queue Q, clKernel&& K, KernelInfo* KI, cl_uint D,
 	             std::vector<size_t>&& IGWO, std::vector<size_t>&& IGWS,
 	             std::vector<size_t>&& ILWS, size_t IWGS,
 	             clMemObj&& DH, clMemObj&& LB, clMemObj&& PB,
 	             std::vector<cl_int>&& HM, size_t HO, clEvent&& E, clEvent&& F,
 	             std::chrono::high_resolution_clock::time_point TP)
-	: Queue(Q), Kernel(K), KernelName(KN), WorkDim(D), GWO(std::move(IGWO)),
-	  GWS(std::move(IGWS)), LWS(std::move(ILWS)), WorkGrpSize(IWGS),
+	: Queue(Q), Kernel(std::move(K)), KInfo(KI), WorkDim(D),
+	  GWO(std::move(IGWO)), GWS(std::move(IGWS)), LWS(std::move(ILWS)), WorkGrpSize(IWGS),
 	  DeviceHeader(std::move(DH)), LocalBuffer(std::move(LB)), PrivateBuffer(std::move(PB)),
 	  HostMetadata(std::move(HM)), HeaderOffset(HO), PrevWork{NULL, std::move(E)},
 	  Final(std::move(F)), LastCall(TP), Counter(0) { }
 
 	// Shadow queue and kernel to run
 	cl_command_queue Queue;
-	cl_kernel Kernel;
-	const std::string& KernelName;
+	clKernel         Kernel;
+	KernelInfo*      KInfo;
 
 	// Needed for enqueue
 	cl_uint WorkDim;

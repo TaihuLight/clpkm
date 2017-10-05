@@ -55,6 +55,13 @@ struct Finalizer<cl_program> {
 		}
 	};
 
+template <>
+struct Finalizer<cl_kernel> {
+	cl_int Finalize(cl_kernel Kernel) {
+		return Lookup<OclAPI::clReleaseKernel>()(Kernel);
+		}
+	};
+
 // A special RAII guard tailored for OpenCL stuff
 // The inheritence is to enable empty base class optimization
 template <class ResType>
@@ -84,6 +91,8 @@ public:
 
 	ResType& get(void) { return Resource; }
 
+	bool operator!(void) const { return (Resource == NULL); }
+
 	ResGuard() = delete;
 	ResGuard(const ResGuard& ) = delete;
 	ResGuard& operator=(const ResGuard& ) = delete;
@@ -98,6 +107,7 @@ using clMemObj = ResGuard<cl_mem>;
 using clEvent = ResGuard<cl_event>;
 using clQueue = ResGuard<cl_command_queue>;
 using clProgram = ResGuard<cl_program>;
+using clKernel = ResGuard<cl_kernel>;
 
 } // namespace CLPKM
 
