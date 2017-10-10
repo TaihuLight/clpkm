@@ -21,6 +21,7 @@ export LD_LIBRARY_PATH=$(realpath ~/llvm-5.0.0-dbg/lib)
 # Temp files
 TMPBASE=/tmp/clpkm_drv_"$BASHPID"_"$RANDOM"
 ORIGINAL="$TMPBASE"_original.cl
+INLINED="$TMPBASE"_inlined.cl
 INSTRED="$TMPBASE"_instr.cl
 PROFLIST="$TMPBASE"_profile.yaml
 CCLOG="$TMPBASE".log
@@ -29,11 +30,24 @@ CCLOG="$TMPBASE".log
 # Read source code from stdin
 cat > "$ORIGINAL"
 
+# : << COMMENT_OUT_TO_ENABLE_INLINER
+# Invoke OpenCL inliner
+"$CLINLINER" "$ORIGINAL" \
+  -- -include clc/clc.h -std=cl1.2 $@ \
+  1> "$INLINED" 2> "$CCLOG"
+
+# Failed
+if [ ! "$?" -eq 0 ]; then
+  cat "$CCLOG" 1>&2
+  exit 1
+fi
+# COMMENT_OUT_TO_ENABLE_INLINER
+
 # Invoke CLPKMCC
-"$CLPKMCC" "$ORIGINAL" \
+"$CLPKMCC" "$INLINED" \
   --source-output="$INSTRED" --profile-output="$PROFLIST" \
   -- -include clc/clc.h -std=cl1.2 $@ \
-  1> /dev/null 2> "$CCLOG"
+  1> /dev/null 2>> "$CCLOG"
 
 # Failed
 if [ ! "$?" -eq 0 ]; then
@@ -45,4 +59,4 @@ else
   cat "$PROFLIST" 1>&2
 fi
 
-rm -f "$ORIGINAL" "$INSTRED" "$PROFLIST" "$CCLOG"
+rm -f "$ORIGINAL" "$INLINED" "$INSTRED" "$PROFLIST" "$CCLOG"
