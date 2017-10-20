@@ -1,0 +1,95 @@
+#!/usr/bin/env bash
+
+if [[ "$#" -ne 1 ]]; then
+	printf 'OpenCL API usage collector\n\nUsage:\n\t"%s" <file or dir>\n' "$0"
+	exit
+fi
+
+grep -o -I -r \
+		-e clBuildProgram \
+		-e clCompileProgram \
+		-e clCreateBuffer \
+		-e clCreateCommandQueue \
+		-e clCreateContext \
+		-e clCreateContextFromType \
+		-e clCreateImage \
+		-e clCreateKernel \
+		-e clCreateKernelsInProgram \
+		-e clCreateProgramWithBinary \
+		-e clCreateProgramWithBuiltInKernels \
+		-e clCreateProgramWithSource \
+		-e clCreateSampler \
+		-e clCreateSubBuffer \
+		-e clCreateSubDevices \
+		-e clCreateUserEvent \
+		-e clEnqueueBarrier \
+		-e clEnqueueBarrierWithWaitList \
+		-e clEnqueueCopyBuffer \
+		-e clEnqueueCopyBufferRect \
+		-e clEnqueueCopyBufferToImage \
+		-e clEnqueueCopyImage \
+		-e clEnqueueCopyImageToBuffer \
+		-e clEnqueueFillBuffer \
+		-e clEnqueueFillImage \
+		-e clEnqueueMapBuffer \
+		-e clEnqueueMapImage \
+		-e clEnqueueMarker \
+		-e clEnqueueMarkerWithWaitList \
+		-e clEnqueueMigrateMemObjects \
+		-e clEnqueueNativeKernel \
+		-e clEnqueueNDRangeKernel \
+		-e clEnqueueReadBuffer \
+		-e clEnqueueReadBufferRect \
+		-e clEnqueueReadImage \
+		-e clEnqueueTask \
+		-e clEnqueueUnmapMemObject \
+		-e clEnqueueWaitForEvents \
+		-e clEnqueueWriteBuffer \
+		-e clEnqueueWriteBufferRect \
+		-e clEnqueueWriteImage \
+		-e clFinish \
+		-e clFlush \
+		-e clGetCommandQueueInfo \
+		-e clGetContextInfo \
+		-e clGetDeviceIDs \
+		-e clGetDeviceInfo \
+		-e clGetEventInfo \
+		-e clGetEventProfilingInfo \
+		-e clGetExtensionFunctionAddress \
+		-e clGetExtensionFunctionAddressForPlatform \
+		-e clGetImageInfo \
+		-e clGetKernelArgInfo \
+		-e clGetKernelInfo \
+		-e clGetKernelWorkGroupInfo \
+		-e clGetMemObjectInfo \
+		-e clGetPlatformIDs \
+		-e clGetPlatformInfo \
+		-e clGetProgramBuildInfo \
+		-e clGetProgramInfo \
+		-e clGetSamplerInfo \
+		-e clGetSupportedImageFormats \
+		-e clLinkProgram \
+		-e clReleaseCommandQueue \
+		-e clReleaseContext \
+		-e clReleaseDevice \
+		-e clReleaseEvent \
+		-e clReleaseKernel \
+		-e clReleaseMemObject \
+		-e clReleaseProgram \
+		-e clReleaseSampler \
+		-e clRetainCommandQueue \
+		-e clRetainContext \
+		-e clRetainDevice \
+		-e clRetainEvent \
+		-e clRetainKernel \
+		-e clRetainMemObject \
+		-e clRetainProgram \
+		-e clRetainSampler \
+		-e clSetEventCallback \
+		-e clSetKernelArg \
+		-e clSetMemObjectDestructorCallback \
+		-e clSetUserEventStatus \
+		-e clUnloadCompiler \
+		-e clUnloadPlatformCompiler \
+		-e clWaitForEvents \
+		"$1" | awk -F ':' '{ print $NF }' | sort | uniq
