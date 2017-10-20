@@ -1,7 +1,7 @@
 CXX         = clang++
 LLVM_CONFIG = llvm-config
 
-CXXFLAGS = -Wall -Wextra -pedantic -fstack-protector-strong -std=c++14 \
+CXXFLAGS = -Wall -Wextra -pedantic -fstack-protector-strong -std=c++17 \
            # -O2 -ftree-vectorize -flto
 LDFLAGS  = -Wl,-O1,--sort-common,--as-needed,-z,relro,-z,now # -s
 LIBS     = 

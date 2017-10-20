@@ -309,7 +309,7 @@ bool Instrumentor::TraverseFunctionDecl(FunctionDecl* FuncDecl) {
 		"  // Load live values for variables locate in local memory\n" +
 		std::move(Locfefe.second) +
 		InitBarrier +
-		"  switch (__clpkm_hdr[__clpkm_id]) {\n"
+		"  switch (__builtin_expect(__clpkm_hdr[__clpkm_id], 1)) {\n"
 		"  default: goto __CLPKM_SV_LOC_AND_RET;\n"
 		"  case 1: ;\n");
 
