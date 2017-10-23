@@ -67,17 +67,21 @@ cl_command_queue clCreateCommandQueue(cl_context Context, cl_device_id Device,
 	// If we reach here, things shall be fine
 	// Set to NULL to prevent it from being released
 	QueueWrap.get() = NULL;
-	*ErrorRet = CL_SUCCESS;
+
+	if (ErrorRet != nullptr)
+		*ErrorRet = CL_SUCCESS;
 
 	return RawQueue;
 
 	}
 catch (const __ocl_error& OclError) {
-	*ErrorRet =  OclError;
+	if (ErrorRet != nullptr)
+		*ErrorRet =  OclError;
 	return NULL;
 	}
 catch (const std::bad_alloc& ) {
-	*ErrorRet = CL_OUT_OF_HOST_MEMORY;
+	if (ErrorRet != nullptr)
+		*ErrorRet = CL_OUT_OF_HOST_MEMORY;
 	return NULL;
 	}
 
