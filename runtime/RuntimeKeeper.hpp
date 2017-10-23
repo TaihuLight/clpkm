@@ -81,7 +81,7 @@ struct EventLog {
 
 using QueueTable = std::unordered_map<cl_command_queue, QueueInfo>;
 using ProgramTable = std::unordered_map<cl_program, ProgramInfo>;
-using KernelTable = std::unordered_set<KernelInfo*>;
+using KernelTable = std::unordered_map<cl_kernel, KernelInfo>;
 using EventLogger = std::unordered_map<cl_event, EventLog>;
 using tlv_t = cl_uint;
 

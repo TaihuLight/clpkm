@@ -279,28 +279,25 @@ cl_kernel clCreateKernel(cl_program Program, const char* Name, cl_int* Ret) try 
 	cl_program ShadowProg = ProgInfo.ShadowProgram.get();
 
 	// Try to create the first kernel so we can report error early
-	clKernel FirstKernel = Lookup<OclAPI::clCreateKernel>()(ShadowProg, Name,
-	                                                        Ret);
+	cl_kernel RawKernel = Lookup<OclAPI::clCreateKernel>()(ShadowProg, Name,
+	                                                       Ret);
 
 	// Creation failed
-	if (!FirstKernel)
+	if (RawKernel == NULL)
 		return NULL;
 
-	auto NewInfo = std::make_unique<KernelInfo>(Context, ShadowProg, &(*Pos));
-	auto* RawInfo = NewInfo.get();
-
-	// Put the first kernel into the pool
-	(RawInfo->Pool).emplace_back(std::move(FirstKernel));
+	clKernel KernelWrap = RawKernel;
+	KernelInfo NewInfo(Context, ShadowProg, &(*Pos));
 
 	boost::unique_lock<boost::upgrade_mutex> WrLock(RT.getKTLock());
 
-	const auto& KTIt = RT.getKernelTable().emplace(RawInfo);
+	const auto KTIt = RT.getKernelTable().emplace(RawKernel, std::move(NewInfo));
 	INTER_ASSERT(KTIt.second, "insertion to kernel table didn't table place");
 
-	NewInfo.release();
+	KernelWrap.get() = NULL;
 
 	// cl_kernel is a pointer type
-	return reinterpret_cast<cl_kernel>(RawInfo);
+	return RawKernel;
 
 	}
 catch (const std::bad_alloc& ) {
@@ -319,8 +316,6 @@ cl_int clEnqueueNDRangeKernel(cl_command_queue Queue,
                               const cl_event* WaitingList,
                               cl_event* Event) try {
 
-	KernelInfo* KI = reinterpret_cast<KernelInfo*>(K);
-
 	auto& RT = getRuntimeKeeper();
 	auto& QT = RT.getQueueTable();
 	auto& KT = RT.getKernelTable();
@@ -328,7 +323,7 @@ cl_int clEnqueueNDRangeKernel(cl_command_queue Queue,
 	boost::shared_lock<boost::upgrade_mutex> QTLock(RT.getQTLock());
 	boost::shared_lock<boost::upgrade_mutex> KTLock(RT.getKTLock());
 	const auto QueueEntry = QT.find(Queue);
-	const auto KTEntry = KT.find(KI);
+	const auto KTEntry = KT.find(K);
 
 	// Step 0 - 1
 	// Pre-check
@@ -343,7 +338,7 @@ cl_int clEnqueueNDRangeKernel(cl_command_queue Queue,
 
 	// FIXME: Shall we also lock ProgramTable?
 	auto& QueueInfo = QueueEntry->second;
-	auto& KernelInfo = *KI;
+	auto& KernelInfo = KTEntry->second;
 	auto& Profile = *KernelInfo.Profile;
 	cl_int Ret = CL_SUCCESS;
 
@@ -516,7 +511,7 @@ cl_int clEnqueueNDRangeKernel(cl_command_queue Queue,
 
 	// New callback
 	auto Work = std::make_unique<CallbackData>(
-			QueueInfo.ShadowQueue.get(), std::move(KernelWrap), KI,
+			QueueInfo.ShadowQueue.get(), std::move(KernelWrap), &KernelInfo,
 			WorkDim, GWO ? std::vector<size_t>(GWO, GWO + WorkDim)
 			             : std::vector<size_t>(WorkDim, 0),
 			std::vector<size_t>(GWS, GWS + WorkDim),
@@ -552,20 +547,20 @@ catch (const std::bad_alloc& ) {
 
 cl_int clRetainKernel(cl_kernel K) {
 
-	KernelInfo* KI = reinterpret_cast<KernelInfo*>(K);
-
 	auto& RT = getRuntimeKeeper();
 	auto& KT = RT.getKernelTable();
 
 	boost::shared_lock<boost::upgrade_mutex> RdLock(RT.getKTLock());
-	const auto It = KT.find(KI);
+	const auto It = KT.find(K);
 
 	if (It == KT.end())
 		return CL_INVALID_KERNEL;
 
-	std::lock_guard<std::mutex> Lock(*KI->Mutex);
+	auto& KI = It->second;
 
-	++(KI->RefCount);
+	std::lock_guard<std::mutex> Lock(*KI.Mutex);
+
+	++KI.RefCount;
 
 	return CL_SUCCESS;
 
@@ -573,20 +568,20 @@ cl_int clRetainKernel(cl_kernel K) {
 
 cl_int clReleaseKernel(cl_kernel K) {
 
-	KernelInfo* KI = reinterpret_cast<KernelInfo*>(K);
-
 	auto& RT = getRuntimeKeeper();
 	auto& KT = RT.getKernelTable();
 
 	boost::upgrade_lock<boost::upgrade_mutex> RdLock(RT.getKTLock());
-	const auto It = KT.find(KI);
+	const auto It = KT.find(K);
 
 	if (It == KT.end())
 		return CL_INVALID_KERNEL;
 
-	std::unique_lock<std::mutex> KILock(*KI->Mutex);
+	auto& KI = It->second;
 
-	if (--(KI->RefCount) > 0)
+	std::unique_lock<std::mutex> KILock(*KI.Mutex);
+
+	if (--KI.RefCount > 0)
 		return CL_SUCCESS;
 
 	// If the reference count is 0
@@ -597,10 +592,9 @@ cl_int clReleaseKernel(cl_kernel K) {
 	KILock.unlock();
 	KILock.release();
 
-	delete KI;
 	KT.erase(It);
 
-	return CL_SUCCESS;
+	return Lookup<OclAPI::clReleaseKernel>()(K);
 
 	}
 
@@ -643,23 +637,22 @@ catch (const __ocl_error& OclError) {
 cl_int clSetKernelArg(cl_kernel K, cl_uint ArgIndex, size_t ArgSize,
                       const void* ArgValue) {
 
-	KernelInfo* KI = reinterpret_cast<KernelInfo*>(K);
-
 	auto& RT = getRuntimeKeeper();
 	auto& KT = RT.getKernelTable();
 
 	boost::shared_lock<boost::upgrade_mutex> KTLock(RT.getKTLock());
-	const auto& KTEntry = KT.find(KI);
+	const auto KTEntry = KT.find(K);
 
 	if (KTEntry == KT.end())
 		return CL_INVALID_KERNEL;
 
-	auto& KIArgs = KI->Args;
+	auto& KI = KTEntry->second;
+	auto& KIArgs = KI.Args;
 
 	if (ArgIndex >= KIArgs.size())
 		return CL_INVALID_ARG_INDEX;
 
-	const auto& DynLocParams = KI->Profile->LocPtrParamIdx;
+	const auto& DynLocParams = KI.Profile->LocPtrParamIdx;
 
 	// If the argument is a dynamically sized local buffer, ArgIndex should be in
 	// DynLocParams
@@ -681,10 +674,16 @@ cl_int clSetKernelArg(cl_kernel K, cl_uint ArgIndex, size_t ArgSize,
 	else if (ArgValue == NULL)
 		return CL_INVALID_ARG_VALUE;
 
-	KIArgs[ArgIndex].first = ArgSize;
-	KIArgs[ArgIndex].second = ArgValue;
+	// The key is never used, only for sanity check
+	cl_int Ret = Lookup<OclAPI::clSetKernelArg>()(K, ArgIndex, ArgSize, ArgValue);
 
-	return CL_SUCCESS;
+	// Only record on success
+	if (Ret == CL_SUCCESS) {
+		KIArgs[ArgIndex].first = ArgSize;
+		KIArgs[ArgIndex].second = ArgValue;
+		}
+
+	return Ret;
 
 	}
 
