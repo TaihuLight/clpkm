@@ -33,6 +33,10 @@ public:
 	// Update cost counter
 	bool VisitStmt(clang::Stmt* );
 
+	// Manipulate scope, manually remove track from LiveVarTracker to workaround
+	// Clang considering some variable still alive outside of StmtExpr
+	bool TraverseCompoundStmt(clang::CompoundStmt* );
+
 	// Set header to 0 before return
 	bool VisitReturnStmt(clang::ReturnStmt* );
 

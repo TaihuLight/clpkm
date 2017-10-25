@@ -11,7 +11,7 @@
 #include "clang/Analysis/Analyses/LiveVariables.h"
 #include "clang/Analysis/CFGStmtMap.h"
 #include "clang/AST/ASTContext.h"
-#include <set>
+#include <map>
 
 
 
@@ -27,7 +27,7 @@ private:
 			}
 		};
 
-	using tracker_type = std::set<clang::VarDecl*, SortBySize>;
+	using tracker_type = std::map<clang::VarDecl*, unsigned, SortBySize>;
 	using tracker_iter = tracker_type::iterator;
 
 public:
@@ -41,12 +41,12 @@ public:
 		iterator(const iterator& ) = default;
 		iterator& operator=(const iterator& ) = default;
 
-		auto& operator*() { return *It; }
-		auto* operator->() { return &(*It); }
+		auto& operator*() { return It->first; }
+		auto* operator->() { return &(It->first); }
 		iterator operator++(int) { auto Old(*this); ++(*this); return Old; }
 
 		iterator& operator++() {
-			while(++It != LVT->Tracker.end() && !LVT->IsLiveAfter(*It, S));
+			while(++It != LVT->Tracker.end() && !LVT->IsLiveAfter(It->first, S));
 			return (*this);
 			}
 
@@ -75,7 +75,7 @@ public:
 
 		iterator begin() const {
 			tracker_iter It = LVT->Tracker.begin();
-			while (It != LVT->Tracker.end() && !LVT->IsLiveAfter(*It, S))
+			while (It != LVT->Tracker.end() && !LVT->IsLiveAfter(It->first, S))
 				++It;
 			return iterator(LVT, S, It);
 			}
@@ -94,7 +94,8 @@ public:
 
 	// Default stuff
 	LiveVarTracker()
-	: Manager(nullptr), Context(nullptr), Map(nullptr), LiveVar(nullptr) { }
+	: Manager(nullptr), Context(nullptr), Map(nullptr), LiveVar(nullptr),
+	  Scope(0) { }
 
 	~LiveVarTracker() { this->EndContext(); }
 	LiveVarTracker(const LiveVarTracker& ) = delete;
@@ -105,9 +106,16 @@ public:
 	bool HasContext() const noexcept { return (Map != nullptr); }
 
 	// Variable declarations to track liveness
-	bool AddTrack(clang::VarDecl* VD) { return Tracker.emplace(VD).second; }
+	bool AddTrack(clang::VarDecl* VD) { return Tracker.emplace(VD, Scope).second; }
 	bool RemoveTrack(clang::VarDecl* VD) { return (Tracker.erase(VD) > 0); }
 	void ClearTrack() { Tracker.clear(); }
+
+	// We don't need this if Clang's live value analysis works properly...
+	// Sometimes Clang considers variables still alive outside of its scope,
+	// especially those declared in StmtExprs...
+	// Remove them from tracking manually to workaround this problem
+	void NewScope() { ++Scope; }
+	void PopScope();
 
 	liveness GenLivenessAfter(clang::Stmt* S) { return liveness(this, S); }
 
@@ -120,6 +128,7 @@ private:
 	clang::LiveVariables*              LiveVar;
 
 	tracker_type Tracker;
+	unsigned Scope;
 
 	};
 

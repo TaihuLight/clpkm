@@ -39,6 +39,7 @@ void LiveVarTracker::EndContext() {
 	Context = nullptr;
 	Map = nullptr;
 	LiveVar = nullptr;
+	Scope = 0;
 
 	}
 
@@ -49,10 +50,24 @@ bool LiveVarTracker::IsLiveAfter(VarDecl* VD, Stmt* S) const {
 
 	CFGBlock* B = Map->getBlock(S);
 
-	// The given Stmt is not in the CFGMap???
 	if (B == nullptr)
-		return false;
+		llvm_unreachable("Stmt outside of CFGMap???");
 
 	return LiveVar->isLive(B, VD);
+
+	}
+
+void LiveVarTracker::PopScope() {
+
+	auto It = Tracker.begin();
+
+	while (It != Tracker.end()) {
+		if (It->second >= Scope)
+			It = Tracker.erase(It);
+		else
+			++It;
+		}
+
+	--Scope;
 
 	}

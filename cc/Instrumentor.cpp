@@ -67,6 +67,16 @@ bool Instrumentor::VisitStmt(Stmt* S) {
 
 	}
 
+bool Instrumentor::TraverseCompoundStmt(CompoundStmt* CS) {
+
+	LVT.NewScope();
+	bool Ret = RecursiveASTVisitor<Instrumentor>::TraverseCompoundStmt(CS);
+	LVT.PopScope();
+
+	return Ret;
+
+	}
+
 bool Instrumentor::VisitReturnStmt(ReturnStmt* RS) {
 
 	if (RS != nullptr) {
