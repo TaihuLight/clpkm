@@ -818,6 +818,35 @@ catch (const std::bad_alloc& ) {
 	return CL_OUT_OF_HOST_MEMORY;
 	}
 
+cl_int clEnqueueReadImage(cl_command_queue Queue,
+                          cl_mem Image,
+                          cl_bool Blocking,
+                          const size_t Origin[3],
+                          const size_t Region[3],
+                          size_t RowPitch,
+                          size_t SlicePitch,
+                          void* Ptr,
+                          cl_uint NumOfWaiting,
+                          const cl_event* WaitingList,
+                          cl_event* Event) try {
+
+	auto ReadImage = [&](const cl_event* NewWaitingList, size_t NewNumOfWaiting,
+	                     cl_event* AltEvent) -> cl_int {
+		return Lookup<OclAPI::clEnqueueReadImage>()(
+				Queue, Image, Blocking, Origin, Region, RowPitch, SlicePitch, Ptr,
+				NewNumOfWaiting, NewWaitingList, AltEvent);
+		};
+
+	return Reorder(Queue, WaitingList, NumOfWaiting, Event, ReadImage);
+
+	}
+catch (const __ocl_error& OclError) {
+	return OclError;
+	}
+catch (const std::bad_alloc& ) {
+	return CL_OUT_OF_HOST_MEMORY;
+	}
+
 cl_int clEnqueueWriteImage(cl_command_queue Queue,
                            cl_mem Image,
                            cl_bool Blocking,
@@ -848,17 +877,68 @@ catch (const std::bad_alloc& ) {
 	return CL_OUT_OF_HOST_MEMORY;
 	}
 
+cl_int clEnqueueCopyBuffer(cl_command_queue Queue,
+                           cl_mem  SrcBuffer,
+                           cl_mem  DstBuffer,
+                           size_t  SrcOffset,
+                           size_t  DstOffset,
+                           size_t  Size,
+                           cl_uint NumOfWaiting,
+                           const cl_event* WaitingList,
+                           cl_event* Event) try {
+
+	auto CopyBuffer = [&](const cl_event* NewWaitingList, size_t NewNumOfWaiting,
+	                      cl_event* AltEvent) -> cl_int {
+		return Lookup<OclAPI::clEnqueueCopyBuffer>()(
+				Queue, SrcBuffer, DstBuffer, SrcOffset, DstOffset, Size,
+				NewNumOfWaiting, NewWaitingList, AltEvent);
+		};
+
+	return Reorder(Queue, WaitingList, NumOfWaiting, Event, CopyBuffer);
+
+	}
+catch (const __ocl_error& OclError) {
+	return OclError;
+	}
+catch (const std::bad_alloc& ) {
+	return CL_OUT_OF_HOST_MEMORY;
+	}
+
+cl_int clEnqueueCopyBufferToImage(cl_command_queue Queue,
+                                  cl_mem  SrcBuffer,
+                                  cl_mem  DstImage,
+                                  size_t  SrcOffset,
+                                  const size_t* DstOrigin,
+                                  const size_t* Region,
+                                  cl_uint NumOfWaiting,
+                                  const cl_event* WaitingList,
+                                  cl_event* Event) try {
+
+	auto Copy2Image = [&](const cl_event* NewWaitingList, size_t NewNumOfWaiting,
+	                      cl_event* AltEvent) -> cl_int {
+		return Lookup<OclAPI::clEnqueueCopyBufferToImage>()(
+				Queue, SrcBuffer, DstImage, SrcOffset, DstOrigin, Region,
+				NewNumOfWaiting, NewWaitingList, AltEvent);
+		};
+
+	return Reorder(Queue, WaitingList, NumOfWaiting, Event, Copy2Image);
+
+	}
+catch (const __ocl_error& OclError) {
+	return OclError;
+	}
+catch (const std::bad_alloc& ) {
+	return CL_OUT_OF_HOST_MEMORY;
+	}
+
 // TODO: reorder call to these functions
 // clEnqueueReadBufferRect
 // clEnqueueWriteBufferRect
 // clEnqueueFillBuffer
-// clEnqueueCopyBuffer
 // clEnqueueCopyBufferRect
-// clEnqueueReadImage
 // clEnqueueFillImage
 // clEnqueueCopyImage
 // clEnqueueCopyImageToBuffer
-// clEnqueueCopyBufferToImage
 // clEnqueueMapImage
 // clEnqueueMigrateMemObjects
 // clEnqueueTask
