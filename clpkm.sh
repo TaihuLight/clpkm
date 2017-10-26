@@ -42,10 +42,13 @@ CCLOG="$TMPBASE".log
 # Read source code from stdin
 cat > "$ORIGINAL"
 
+print_banner 'Options' > "$CCLOG"
+echo "$@" >> "$CCLOG"
+
 # : << COMMENT_OUT_TO_ENABLE_PREPROCESS
 # Step 1
 # Preprocess and invoke OpenCL inliner
-print_banner 'Preprocess stage' > "$CCLOG"
+print_banner 'Preprocess stage' >> "$CCLOG"
 
 "$CLPKMPP" "$ORIGINAL" \
   -- -include clc/clc.h -std=cl1.2 $@ \

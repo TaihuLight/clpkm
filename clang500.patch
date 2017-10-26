@@ -22,7 +22,7 @@ index 0cdbd2a..54bf981 100644
    /// value-dependent (C++ [temp.dep.constexpr]). For example, the
    /// array bound of "Chars" in the following example is
 diff --git a/include/clang/AST/Stmt.h b/include/clang/AST/Stmt.h
-index c210bd1..229bccc 100644
+index c210bd1..a0feb7f 100644
 --- a/include/clang/AST/Stmt.h
 +++ b/include/clang/AST/Stmt.h
 @@ -370,6 +370,9 @@ public:
@@ -120,7 +120,51 @@ index c210bd1..229bccc 100644
  
    static bool classof(const Stmt *T) {
      return T->getStmtClass() == ForStmtClass;
-@@ -1391,18 +1414,22 @@ public:
+@@ -1327,8 +1350,11 @@ public:
+ ///
+ class ContinueStmt : public Stmt {
+   SourceLocation ContinueLoc;
++  SourceLocation SemiLoc;
++
+ public:
+-  ContinueStmt(SourceLocation CL) : Stmt(ContinueStmtClass), ContinueLoc(CL) {}
++  ContinueStmt(SourceLocation CL, SourceLocation SL = SourceLocation())
++  : Stmt(ContinueStmtClass), ContinueLoc(CL), SemiLoc(SL) {}
+ 
+   /// \brief Build an empty continue statement.
+   explicit ContinueStmt(EmptyShell Empty) : Stmt(ContinueStmtClass, Empty) { }
+@@ -1338,6 +1364,7 @@ public:
+ 
+   SourceLocation getLocStart() const LLVM_READONLY { return ContinueLoc; }
+   SourceLocation getLocEnd() const LLVM_READONLY { return ContinueLoc; }
++  SourceLocation getStmtLocEnd() const LLVM_READONLY { return SemiLoc; }
+ 
+   static bool classof(const Stmt *T) {
+     return T->getStmtClass() == ContinueStmtClass;
+@@ -1353,10 +1380,12 @@ public:
+ ///
+ class BreakStmt : public Stmt {
+   SourceLocation BreakLoc;
++  SourceLocation SemiLoc;
+ 
+ public:
+-  BreakStmt(SourceLocation BL) : Stmt(BreakStmtClass), BreakLoc(BL) {
+-    static_assert(sizeof(BreakStmt) == 2 * sizeof(SourceLocation),
++  BreakStmt(SourceLocation BL, SourceLocation SL = SourceLocation())
++  : Stmt(BreakStmtClass), BreakLoc(BL), SemiLoc(SL) {
++    static_assert(sizeof(BreakStmt) > 2 * sizeof(SourceLocation),
+                   "BreakStmt too large");
+   }
+ 
+@@ -1368,6 +1397,7 @@ public:
+ 
+   SourceLocation getLocStart() const LLVM_READONLY { return BreakLoc; }
+   SourceLocation getLocEnd() const LLVM_READONLY { return BreakLoc; }
++  SourceLocation getStmtLocEnd() const LLVM_READONLY { return SemiLoc; }
+ 
+   static bool classof(const Stmt *T) {
+     return T->getStmtClass() == BreakStmtClass;
+@@ -1391,18 +1421,22 @@ public:
  ///
  class ReturnStmt : public Stmt {
    SourceLocation RetLoc;
@@ -147,7 +191,7 @@ index c210bd1..229bccc 100644
  
    const Expr *getRetValue() const;
    Expr *getRetValue();
-@@ -1423,6 +1450,9 @@ public:
+@@ -1423,6 +1457,9 @@ public:
    SourceLocation getLocEnd() const LLVM_READONLY {
      return RetExpr ? RetExpr->getLocEnd() : RetLoc;
    }
@@ -181,7 +225,7 @@ index 21d699e..aafbd60 100644
    /// \brief The kind of extra semi diagnostic to emit.
    enum ExtraSemiKind {
 diff --git a/include/clang/Sema/Sema.h b/include/clang/Sema/Sema.h
-index 5a70854..b9a3f19 100644
+index 5a70854..940ebe7 100644
 --- a/include/clang/Sema/Sema.h
 +++ b/include/clang/Sema/Sema.h
 @@ -3598,7 +3598,8 @@ public:
@@ -204,7 +248,20 @@ index 5a70854..b9a3f19 100644
  
    StmtResult ActOnForStmt(SourceLocation ForLoc,
                            SourceLocation LParenLoc,
-@@ -3743,8 +3745,10 @@ public:
+@@ -3723,8 +3725,10 @@ public:
+   StmtResult ActOnIndirectGotoStmt(SourceLocation GotoLoc,
+                                    SourceLocation StarLoc,
+                                    Expr *DestExp);
+-  StmtResult ActOnContinueStmt(SourceLocation ContinueLoc, Scope *CurScope);
+-  StmtResult ActOnBreakStmt(SourceLocation BreakLoc, Scope *CurScope);
++  StmtResult ActOnContinueStmt(SourceLocation ContinueLoc, Scope *CurScope,
++                               SourceLocation SemiLoc = SourceLocation());
++  StmtResult ActOnBreakStmt(SourceLocation BreakLoc, Scope *CurScope,
++                            SourceLocation SemiLoc = SourceLocation());
+ 
+   void ActOnCapturedRegionStart(SourceLocation Loc, Scope *CurScope,
+                                 CapturedRegionKind Kind, unsigned NumParams);
+@@ -3743,8 +3747,10 @@ public:
                                bool AllowParamOrMoveConstructible);
  
    StmtResult ActOnReturnStmt(SourceLocation ReturnLoc, Expr *RetValExp,
@@ -217,7 +274,7 @@ index 5a70854..b9a3f19 100644
    StmtResult ActOnCapScopeReturnStmt(SourceLocation ReturnLoc, Expr *RetValExp);
  
    StmtResult ActOnGCCAsmStmt(SourceLocation AsmLoc, bool IsSimple,
-@@ -5188,7 +5192,8 @@ public:
+@@ -5188,7 +5194,8 @@ public:
    ExprResult ActOnFinishFullExpr(Expr *Expr, SourceLocation CC,
                                   bool DiscardedValue = false,
                                   bool IsConstexpr = false,
@@ -255,7 +312,7 @@ index 2367cad..51c90db 100644
                             SourceLocation LB, SourceLocation RB)
    : Stmt(CompoundStmtClass), LBraceLoc(LB), RBraceLoc(RB) {
 diff --git a/lib/Parse/ParseStmt.cpp b/lib/Parse/ParseStmt.cpp
-index b1fbb20..d1284f9 100644
+index b1fbb20..b420ef0 100644
 --- a/lib/Parse/ParseStmt.cpp
 +++ b/lib/Parse/ParseStmt.cpp
 @@ -433,8 +433,9 @@ StmtResult Parser::ParseExprStatement() {
@@ -283,7 +340,27 @@ index b1fbb20..d1284f9 100644
  }
  
  bool Parser::isForRangeIdentifier() {
-@@ -1913,9 +1917,13 @@ StmtResult Parser::ParseReturnStatement() {
+@@ -1864,7 +1868,8 @@ StmtResult Parser::ParseGotoStatement() {
+ ///
+ StmtResult Parser::ParseContinueStatement() {
+   SourceLocation ContinueLoc = ConsumeToken();  // eat the 'continue'.
+-  return Actions.ActOnContinueStmt(ContinueLoc, getCurScope());
++  SourceLocation SemiLoc = Tok.getLocation();
++  return Actions.ActOnContinueStmt(ContinueLoc, getCurScope(), SemiLoc);
+ }
+ 
+ /// ParseBreakStatement
+@@ -1875,7 +1880,8 @@ StmtResult Parser::ParseContinueStatement() {
+ ///
+ StmtResult Parser::ParseBreakStatement() {
+   SourceLocation BreakLoc = ConsumeToken();  // eat the 'break'.
+-  return Actions.ActOnBreakStmt(BreakLoc, getCurScope());
++  SourceLocation SemiLoc = Tok.getLocation();
++  return Actions.ActOnBreakStmt(BreakLoc, getCurScope(), SemiLoc);
+ }
+ 
+ /// ParseReturnStatement
+@@ -1913,9 +1919,13 @@ StmtResult Parser::ParseReturnStatement() {
        return StmtError();
      }
    }
@@ -364,7 +441,7 @@ index a9cf3ec..0f2d9de 100644
  }
  
 diff --git a/lib/Sema/SemaStmt.cpp b/lib/Sema/SemaStmt.cpp
-index 2a38a1f..4ea7f30 100644
+index 2a38a1f..d329645 100644
 --- a/lib/Sema/SemaStmt.cpp
 +++ b/lib/Sema/SemaStmt.cpp
 @@ -41,12 +41,15 @@
@@ -404,7 +481,41 @@ index 2a38a1f..4ea7f30 100644
  }
  
  namespace {
-@@ -3281,8 +3285,8 @@ bool Sema::DeduceFunctionTypeFromReturnExpr(FunctionDecl *FD,
+@@ -2779,7 +2783,8 @@ static void CheckJumpOutOfSEHFinally(Sema &S, SourceLocation Loc,
+ }
+ 
+ StmtResult
+-Sema::ActOnContinueStmt(SourceLocation ContinueLoc, Scope *CurScope) {
++Sema::ActOnContinueStmt(SourceLocation ContinueLoc, Scope *CurScope,
++                        SourceLocation SemiLoc) {
+   Scope *S = CurScope->getContinueParent();
+   if (!S) {
+     // C99 6.8.6.2p1: A break shall appear only in or as a loop body.
+@@ -2787,11 +2792,12 @@ Sema::ActOnContinueStmt(SourceLocation ContinueLoc, Scope *CurScope) {
+   }
+   CheckJumpOutOfSEHFinally(*this, ContinueLoc, *S);
+ 
+-  return new (Context) ContinueStmt(ContinueLoc);
++  return new (Context) ContinueStmt(ContinueLoc, SemiLoc);
+ }
+ 
+ StmtResult
+-Sema::ActOnBreakStmt(SourceLocation BreakLoc, Scope *CurScope) {
++Sema::ActOnBreakStmt(SourceLocation BreakLoc, Scope *CurScope,
++                     SourceLocation SemiLoc) {
+   Scope *S = CurScope->getBreakParent();
+   if (!S) {
+     // C99 6.8.6.3p1: A break shall appear only in or as a switch/loop body.
+@@ -2802,7 +2808,7 @@ Sema::ActOnBreakStmt(SourceLocation BreakLoc, Scope *CurScope) {
+                      << "break");
+   CheckJumpOutOfSEHFinally(*this, BreakLoc, *S);
+ 
+-  return new (Context) BreakStmt(BreakLoc);
++  return new (Context) BreakStmt(BreakLoc, SemiLoc);
+ }
+ 
+ /// \brief Determine whether the given expression is a candidate for
+@@ -3281,8 +3287,8 @@ bool Sema::DeduceFunctionTypeFromReturnExpr(FunctionDecl *FD,
  
  StmtResult
  Sema::ActOnReturnStmt(SourceLocation ReturnLoc, Expr *RetValExp,
@@ -415,7 +526,7 @@ index 2a38a1f..4ea7f30 100644
    if (R.isInvalid() || ExprEvalContexts.back().Context ==
                             ExpressionEvaluationContext::DiscardedStatement)
      return R;
-@@ -3299,7 +3303,8 @@ Sema::ActOnReturnStmt(SourceLocation ReturnLoc, Expr *RetValExp,
+@@ -3299,7 +3305,8 @@ Sema::ActOnReturnStmt(SourceLocation ReturnLoc, Expr *RetValExp,
    return R;
  }
  
@@ -425,7 +536,7 @@ index 2a38a1f..4ea7f30 100644
    // Check for unexpanded parameter packs.
    if (RetValExp && DiagnoseUnexpandedParameterPack(RetValExp))
      return StmtError();
-@@ -3349,7 +3354,7 @@ StmtResult Sema::BuildReturnStmt(SourceLocation ReturnLoc, Expr *RetValExp) {
+@@ -3349,7 +3356,7 @@ StmtResult Sema::BuildReturnStmt(SourceLocation ReturnLoc, Expr *RetValExp) {
          return StmtError();
        RetValExp = ER.get();
      }
@@ -434,7 +545,7 @@ index 2a38a1f..4ea7f30 100644
    }
  
    // FIXME: Add a flag to the ScopeInfo to indicate whether we're performing
-@@ -3444,7 +3449,7 @@ StmtResult Sema::BuildReturnStmt(SourceLocation ReturnLoc, Expr *RetValExp) {
+@@ -3444,7 +3451,7 @@ StmtResult Sema::BuildReturnStmt(SourceLocation ReturnLoc, Expr *RetValExp) {
        }
      }
  
@@ -443,7 +554,7 @@ index 2a38a1f..4ea7f30 100644
    } else if (!RetValExp && !HasDependentReturnType) {
      FunctionDecl *FD = getCurFunctionDecl();
  
-@@ -3466,7 +3471,7 @@ StmtResult Sema::BuildReturnStmt(SourceLocation ReturnLoc, Expr *RetValExp) {
+@@ -3466,7 +3473,7 @@ StmtResult Sema::BuildReturnStmt(SourceLocation ReturnLoc, Expr *RetValExp) {
      else
        Diag(ReturnLoc, DiagID) << getCurMethodDecl()->getDeclName() << 1/*meth*/;
  
@@ -452,7 +563,7 @@ index 2a38a1f..4ea7f30 100644
    } else {
      assert(RetValExp || HasDependentReturnType);
      const VarDecl *NRVOCandidate = nullptr;
-@@ -3519,7 +3524,7 @@ StmtResult Sema::BuildReturnStmt(SourceLocation ReturnLoc, Expr *RetValExp) {
+@@ -3519,7 +3526,7 @@ StmtResult Sema::BuildReturnStmt(SourceLocation ReturnLoc, Expr *RetValExp) {
          return StmtError();
        RetValExp = ER.get();
      }
