@@ -178,6 +178,38 @@ private:
 	CodeCache     CC;
 	size_t        Nonce;
 
+	SourceLocation ExpandStartLoc(SourceLocation StartLoc) {
+
+		auto& SM = InlinerRewriter.getSourceMgr();
+
+		if(StartLoc.isMacroID()) {
+			auto ExpansionRange = SM.getImmediateExpansionRange(StartLoc);
+			StartLoc = ExpansionRange.first;
+			}
+
+		return StartLoc;
+
+		}
+
+	SourceLocation ExpandEndLoc(SourceLocation EndLoc) {
+
+		auto& SM = InlinerRewriter.getSourceMgr();
+
+		if(EndLoc.isMacroID()) {
+			auto ExpansionRange = SM.getImmediateExpansionRange(EndLoc);
+			EndLoc = ExpansionRange.second;
+			}
+
+		return EndLoc;
+
+		}
+
+	SourceRange ExpandRange(SourceRange Range) {
+		Range.setBegin(ExpandStartLoc(Range.getBegin()));
+		Range.setEnd(ExpandEndLoc(Range.getEnd()));
+		return Range;
+		}
+
 	// Generate code snippet for inlining
 	bool GenCodeSnippet(FunctionDecl* FuncDecl, std::vector<FunctionDecl*>& CallChain) {
 
@@ -196,7 +228,8 @@ private:
 
 			CodeSnippet Body;
 
-			Body.emplace_back(InlinerRewriter.getRewrittenText(FuncDecl->getBody()->getSourceRange()));
+			Body.emplace_back(InlinerRewriter.getRewrittenText(
+					ExpandRange(FuncDecl->getBody()->getSourceRange())));
 			CC.emplace(FuncDecl, std::move(Body));
 
 			return true;
@@ -204,20 +237,20 @@ private:
 			}
 
 		CodeSnippet CS;
-		SourceLocation Front = FuncDecl->getBody()->getLocStart();
+		SourceLocation Front = ExpandStartLoc(FuncDecl->getBody()->getLocStart());
 
 		for (ReturnStmt* RS : RetStmtRecord->second) {
 
-			SourceLocation RSLocStart = RS->getLocStart();
-			SourceLocation RSLocEnd = RS->getLocEnd();
+			SourceLocation RSLocStart = ExpandStartLoc(RS->getLocStart());
+			SourceLocation RSLocEnd = ExpandEndLoc(RS->getLocEnd());
 
 			CS.emplace_back(InlinerRewriter.getRewrittenText({Front, RSLocStart.getLocWithOffset(-1)}));
 			CS.emplace_back(InlinerRewriter.getRewrittenText({RSLocStart.getLocWithOffset(6), RSLocEnd}));
-			Front = RSLocEnd.getLocWithOffset(1);
+			Front = ExpandEndLoc(RS->getStmtLocEnd());
 
 			}
 
-		CS.emplace_back(InlinerRewriter.getRewrittenText({Front, FuncDecl->getBody()->getLocEnd()}));
+		CS.emplace_back(InlinerRewriter.getRewrittenText({Front, ExpandEndLoc(FuncDecl->getBody()->getLocEnd())}));
 		CC.emplace(FuncDecl, std::move(CS));
 
 		return true;
@@ -322,9 +355,9 @@ private:
 			// Prepare the arguments for the call expression
 			while (ParamIt != Callee->param_end()) {
 
-				Replace = InlinerRewriter.getRewrittenText((*ParamIt)->getSourceRange()) +
+				Replace = InlinerRewriter.getRewrittenText(ExpandRange((*ParamIt)->getSourceRange())) +
 				          " = " +
-				          InlinerRewriter.getRewrittenText((*ArgIt)->getSourceRange()) +
+				          InlinerRewriter.getRewrittenText(ExpandRange((*ArgIt)->getSourceRange())) +
 				          ";" + std::move(Replace);
 
 				++ArgIt;
@@ -345,7 +378,7 @@ private:
 			Replace = "({ __label__ " + ExitLabel + "; " +
 			          std::move(Replace) + "})";
 
-			InlinerRewriter.ReplaceText(CE->getSourceRange(),
+			InlinerRewriter.ReplaceText(ExpandRange(CE->getSourceRange()),
 			                            Replace);
 
 			}
