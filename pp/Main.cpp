@@ -36,8 +36,18 @@ static llvm::cl::OptionCategory CLPKMPPCategory("CLPKMPP");
 
 class Extractor : public RecursiveASTVisitor<Extractor> {
 public:
-	Extractor(CompilerInstance& CI, Rewriter& R) :
-		TheCI(CI), TheRewriter(R) {
+	Extractor(CompilerInstance& CI, Rewriter& R)
+	: TheCI(CI), TheRewriter(R) { }
+
+	bool TraverseDecl(clang::Decl* D) {
+
+		bool Ret = true;
+
+		// Don't traverse headers
+		if (D != nullptr && TheCI.getSourceManager().isInMainFile(D->getLocation()))
+			Ret = clang::RecursiveASTVisitor<Extractor>::TraverseDecl(D);
+
+		return Ret;
 
 		}
 
@@ -49,8 +59,10 @@ public:
 		// Workaround a mystery behaviour of Clang. The source range of the
 		// statement below stops right before "b;" under some circumstances
 		//   return a = b;
-		TheRewriter.InsertTextBefore(RS->getRetValue()->getLocStart(), "(");
-		TheRewriter.InsertTextAfterToken(RS->getRetValue()->getLocEnd(), ")");
+		TheRewriter.InsertTextBefore(
+				ExpandStartLoc(RS->getRetValue()->getLocStart()), " ( ");
+		TheRewriter.InsertTextAfterToken(
+				ExpandEndLoc(RS->getRetValue()->getLocEnd()), " ) ");
 
 		return true;
 
@@ -88,6 +100,38 @@ private:
 	CompilerInstance& TheCI;
 	Rewriter&         TheRewriter;
 
+	SourceLocation ExpandStartLoc(SourceLocation StartLoc) {
+
+		auto& SM = TheRewriter.getSourceMgr();
+
+		if(StartLoc.isMacroID()) {
+			auto ExpansionRange = SM.getImmediateExpansionRange(StartLoc);
+			StartLoc = ExpansionRange.first;
+			}
+
+		return StartLoc;
+
+		}
+
+	SourceLocation ExpandEndLoc(SourceLocation EndLoc) {
+
+		auto& SM = TheRewriter.getSourceMgr();
+
+		if(EndLoc.isMacroID()) {
+			auto ExpansionRange = SM.getImmediateExpansionRange(EndLoc);
+			EndLoc = ExpansionRange.second;
+			}
+
+		return EndLoc;
+
+		}
+
+	SourceRange ExpandRange(SourceRange Range) {
+		Range.setBegin(ExpandStartLoc(Range.getBegin()));
+		Range.setEnd(ExpandEndLoc(Range.getEnd()));
+		return Range;
+		}
+
 	bool AppendBrace(Stmt* S) {
 
 		if (S == nullptr || isa<CompoundStmt>(S))
@@ -96,8 +140,8 @@ private:
 		if (!S->getStmtLocEnd().isValid())
 			llvm_unreachable("getStmtLocEnd returned invalid location :(");
 
-		TheRewriter.InsertTextBefore(S->getLocStart(), " { ");
-		TheRewriter.InsertTextAfterToken(S->getStmtLocEnd(), " } ");
+		TheRewriter.InsertTextBefore(ExpandStartLoc(S->getLocStart()), " { ");
+		TheRewriter.InsertTextAfterToken(ExpandEndLoc(S->getStmtLocEnd()), " } ");
 
 		return true;
 

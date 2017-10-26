@@ -20,6 +20,7 @@ function print_banner() {
 }
 
 # Tool path configuration
+CLPKMPP="$(realpath ~/CLPKM/pp/clpkmpp)"
 CLINLINER="$(realpath ~/CLPKM/inliner/clinliner)"
 RENAME_LST_GEN="$(realpath ~/CLPKM/rename-lst-gen/rename-lst-gen)"
 CLPKMCC="$(realpath ~/CLPKM/cc/clpkmcc)"
@@ -29,6 +30,7 @@ export LD_LIBRARY_PATH="$(realpath ~/llvm-5.0.0-rev/clang-rel/lib)":"$LD_LIBRARY
 # Temp files
 TMPBASE=/tmp/clpkm_drv_"$BASHPID"_"$RANDOM"
 ORIGINAL="$TMPBASE"_original.cl
+PREPROCED="$TMPBASE"_preproced.cl
 INLINED="$TMPBASE"_inlined.cl
 RENAME_LST="$TMPBASE"_rename.yaml
 RENAMED="$TMPBASE"_renamed.cl
@@ -40,13 +42,24 @@ CCLOG="$TMPBASE".log
 # Read source code from stdin
 cat > "$ORIGINAL"
 
-# : << COMMENT_OUT_TO_ENABLE_INLINER
-
+# : << COMMENT_OUT_TO_ENABLE_PREPROCESS
 # Step 1
-# Invoke OpenCL inliner
-print_banner 'Inline stage' > "$CCLOG"
+# Preprocess and invoke OpenCL inliner
+print_banner 'Preprocess stage' > "$CCLOG"
 
-"$CLINLINER" "$ORIGINAL" \
+"$CLPKMPP" "$ORIGINAL" \
+  -- -include clc/clc.h -std=cl1.2 $@ \
+  1> "$PREPROCED" 2>> "$CCLOG"
+
+# Failed
+if [ ! "$?" -eq 0 ]; then
+  cat "$CCLOG" 1>&2
+  exit 1
+fi
+
+print_banner 'Inline stage' >> "$CCLOG"
+
+"$CLINLINER" "$PREPROCED" \
   -- -include clc/clc.h -std=cl1.2 $@ \
   1> "$INLINED" 2>> "$CCLOG"
 
@@ -55,7 +68,7 @@ if [ ! "$?" -eq 0 ]; then
   cat "$CCLOG" 1>&2
   exit 1
 fi
-# COMMENT_OUT_TO_ENABLE_INLINER
+# COMMENT_OUT_TO_ENABLE_PREPROCESS
 
 # Step 2
 # Rename inlined source
