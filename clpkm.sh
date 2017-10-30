@@ -20,17 +20,22 @@ function print_banner() {
 }
 
 function prettify() {
-  clang-format -style=llvm "$1" > "$1"_ &&
+  "$CLANG_FORMAT" -style=llvm "$1" > "$1"_ &&
   mv "$1"_ "$1"
 }
 
+# Clang tools
+CLANG_ROOT="$HOME"/llvm-5.0.1-rev/clang-rel
+CLANG_RENAME="$CLANG_ROOT"/bin/clang-rename
+CLANG_FORMAT="$CLANG_ROOT"/bin/clang-format
+export LD_LIBRARY_PATH="$CLANG_ROOT"/lib:"$LD_LIBRARY_PATH"
+
 # Tool path configuration
-CLPKMPP="$(realpath ~/CLPKM/pp/clpkmpp)"
-CLINLINER="$(realpath ~/CLPKM/inliner/clinliner)"
-RENAME_LST_GEN="$(realpath ~/CLPKM/rename-lst-gen/rename-lst-gen)"
-CLPKMCC="$(realpath ~/CLPKM/cc/clpkmcc)"
-TOOLKIT="$(realpath ~/CLPKM/toolkit.cl)"
-export LD_LIBRARY_PATH="$(realpath ~/llvm-5.0.1-rev/clang-rel/lib)":"$LD_LIBRARY_PATH"
+CLPKMPP="$HOME"/CLPKM/pp/clpkmpp
+CLINLINER="$HOME"/CLPKM/inliner/clinliner
+RENAME_LST_GEN="$HOME"/CLPKM/rename-lst-gen/rename-lst-gen
+CLPKMCC="$HOME"/CLPKM/cc/clpkmcc
+TOOLKIT="$HOME"/CLPKM/toolkit.cl
 
 # Temp files
 TMPBASE=/tmp/clpkm_drv_"$BASHPID"_"$RANDOM"
@@ -94,7 +99,7 @@ fi
 
 # Don't do shit if it gens nothin'
 if [ "$(stat -c '%s' "$RENAME_LST")" -gt 0 ]; then
-  clang-rename -input "$RENAME_LST" "$PREPROCED" \
+  "$CLANG_RENAME" -input "$RENAME_LST" "$PREPROCED" \
     -- -include clc/clc.h -std=cl1.2 $@ \
     1> "$RENAMED" 2>> "$CCLOG"
   # Failed
