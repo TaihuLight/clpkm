@@ -19,13 +19,18 @@ function print_banner() {
   echo '===================='
 }
 
+function prettify() {
+  clang-format -style=llvm "$1" > "$1"_ &&
+  mv "$1"_ "$1"
+}
+
 # Tool path configuration
 CLPKMPP="$(realpath ~/CLPKM/pp/clpkmpp)"
 CLINLINER="$(realpath ~/CLPKM/inliner/clinliner)"
 RENAME_LST_GEN="$(realpath ~/CLPKM/rename-lst-gen/rename-lst-gen)"
 CLPKMCC="$(realpath ~/CLPKM/cc/clpkmcc)"
 TOOLKIT="$(realpath ~/CLPKM/toolkit.cl)"
-export LD_LIBRARY_PATH="$(realpath ~/llvm-5.0.0-rev/clang-rel/lib)":"$LD_LIBRARY_PATH"
+export LD_LIBRARY_PATH="$(realpath ~/llvm-5.0.1-rev/clang-rel/lib)":"$LD_LIBRARY_PATH"
 
 # Temp files
 TMPBASE=/tmp/clpkm_drv_"$BASHPID"_"$RANDOM"
@@ -40,7 +45,7 @@ CCLOG="$TMPBASE".log
 
 # Step 0
 # Read source code from stdin
-cat > "$ORIGINAL"
+cat > "$ORIGINAL" && prettify "$ORIGINAL"
 
 print_banner 'Options' > "$CCLOG"
 echo "$@" >> "$CCLOG"
@@ -48,11 +53,11 @@ echo "$@" >> "$CCLOG"
 # : << COMMENT_OUT_TO_ENABLE_PREPROCESS
 # Step 1
 # Preprocess and invoke OpenCL inliner
-print_banner 'Preprocess stage' >> "$CCLOG"
+print_banner 'Inline stage' >> "$CCLOG"
 
-"$CLPKMPP" "$ORIGINAL" \
+"$CLINLINER" "$ORIGINAL" \
   -- -include clc/clc.h -std=cl1.2 $@ \
-  1> "$PREPROCED" 2>> "$CCLOG"
+  1> "$INLINED" 2>> "$CCLOG"
 
 # Failed
 if [ ! "$?" -eq 0 ]; then
@@ -60,11 +65,11 @@ if [ ! "$?" -eq 0 ]; then
   exit 1
 fi
 
-print_banner 'Inline stage' >> "$CCLOG"
+print_banner 'Preprocess stage' >> "$CCLOG"
 
-"$CLINLINER" "$PREPROCED" \
+"$CLPKMPP" "$INLINED" \
   -- -include clc/clc.h -std=cl1.2 $@ \
-  1> "$INLINED" 2>> "$CCLOG"
+  1> "$PREPROCED" 2>> "$CCLOG" && prettify "$PREPROCED"
 
 # Failed
 if [ ! "$?" -eq 0 ]; then
@@ -77,7 +82,7 @@ fi
 # Rename inlined source
 print_banner 'Rename stage' >> "$CCLOG"
 
-"$RENAME_LST_GEN" "$INLINED" \
+"$RENAME_LST_GEN" "$PREPROCED" \
   -- -include clc/clc.h -std=cl1.2 $@ \
   1> "$RENAME_LST" 2>> "$CCLOG"
 
@@ -89,7 +94,7 @@ fi
 
 # Don't do shit if it gens nothin'
 if [ "$(stat -c '%s' "$RENAME_LST")" -gt 0 ]; then
-  clang-rename -input "$RENAME_LST" "$INLINED" \
+  clang-rename -input "$RENAME_LST" "$PREPROCED" \
     -- -include clc/clc.h -std=cl1.2 $@ \
     1> "$RENAMED" 2>> "$CCLOG"
   # Failed
@@ -114,6 +119,8 @@ if [ ! "$?" -eq 0 ]; then
   exit 1
 # Succeed
 else
+  prettify "$INSTRED"
+
   cat "$TOOLKIT" "$INSTRED"
   cat "$PROFLIST" 1>&2
 fi
