@@ -48,8 +48,19 @@ public:
 
 		const FileID MainFileID = SM.getMainFileID();
 
-		auto ThisPos = VD->getLocation().getRawEncoding();
+		SourceLocation L = ExpandStartLoc(VD->getLocation());
+
+		if (L.isMacroID()) {
+			auto& D = SM.getDiagnostics();
+			auto  DiagID = D.getCustomDiagID(
+					DiagnosticsEngine::Level::Warning,
+					"cannot rename variables declared in macros");
+			D.Report(L, DiagID);
+			return true;
+			}
+
 		auto StartPos = SM.getLocForStartOfFile(MainFileID).getRawEncoding();
+		auto ThisPos = L.getRawEncoding();
 
 		const char* VarName = VD->getIdentifier()->getNameStart();
 
@@ -61,6 +72,17 @@ public:
 		}
 
 private:
+	SourceLocation ExpandStartLoc(SourceLocation StartLoc) {
+
+		if(StartLoc.isMacroID()) {
+			auto ExpansionRange = SM.getImmediateExpansionRange(StartLoc);
+			StartLoc = ExpansionRange.first;
+			}
+
+		return StartLoc;
+
+		}
+
 	llvm::raw_ostream&   Outs;
 	const SourceManager& SM;
 
