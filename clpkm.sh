@@ -20,18 +20,24 @@ function print_banner() {
 }
 
 function prettify() {
-  "$CLANG_FORMAT" -style=llvm "$1" > "$1"_ &&
+  "$CLANG_FORMAT" -style=llvm "$1" > "$1"_ && \
   mv "$1"_ "$1"
 }
 
+function prettify_to {
+  "$CLANG_FORMAT" -style=llvm "$1" > "$2" && \
+  rm "$1"
+  }
+
 # Clang tools
 CLANG_ROOT="$HOME"/llvm-5.0.1-rev/clang-rel
-CLANG_RENAME="$CLANG_ROOT"/bin/clang-rename
+CLANG="$CLANG_ROOT"/bin/clang
 CLANG_FORMAT="$CLANG_ROOT"/bin/clang-format
+CLANG_RENAME="$CLANG_ROOT"/bin/clang-rename
+CLANG_TIDY="$CLANG_ROOT"/bin/clang-tidy
 export LD_LIBRARY_PATH="$CLANG_ROOT"/lib:"$LD_LIBRARY_PATH"
 
 # Tool path configuration
-CLPKMPP="$HOME"/CLPKM/pp/clpkmpp
 CLINLINER="$HOME"/CLPKM/inliner/clinliner
 RENAME_LST_GEN="$HOME"/CLPKM/rename-lst-gen/rename-lst-gen
 CLPKMCC="$HOME"/CLPKM/cc/clpkmcc
@@ -50,19 +56,23 @@ CCLOG="$TMPBASE".log
 
 # Step 0
 # Read source code from stdin
-cat > "$ORIGINAL" && prettify "$ORIGINAL"
+cat > "$ORIGINAL"
 
 print_banner 'Options' > "$CCLOG"
-echo "$@" >> "$CCLOG"
+echo "'$@'" >> "$CCLOG"
 
 # : << COMMENT_OUT_TO_ENABLE_PREPROCESS
 # Step 1
 # Preprocess and invoke OpenCL inliner
-print_banner 'Inline stage' >> "$CCLOG"
+print_banner 'Preprocess stage' >> "$CCLOG"
 
-"$CLINLINER" "$ORIGINAL" \
-  -- -include clc/clc.h -std=cl1.2 $@ \
-  1> "$INLINED" 2>> "$CCLOG"
+# NOTE: Preprocess in advance here may break things!
+#       Please have a look at OpenCL 1.2 §6.10
+"$CLANG" "$ORIGINAL" -E -std=cl1.2 $@ 1> "$PREPROCED" 2>> "$CCLOG" && \
+prettify "$PREPROCED" && \
+"$CLANG_TIDY" "$PREPROCED" -format-style=llvm -fix \
+  -checks="readability-braces-around-statements" -- -include clc/clc.h \
+  -std=cl1.2 $@ 1>> "$CCLOG" 2>&1
 
 # Failed
 if [ ! "$?" -eq 0 ]; then
@@ -70,11 +80,11 @@ if [ ! "$?" -eq 0 ]; then
   exit 1
 fi
 
-print_banner 'Preprocess stage' >> "$CCLOG"
+print_banner 'Inline stage' >> "$CCLOG"
 
-"$CLPKMPP" "$INLINED" \
+"$CLINLINER" "$PREPROCED" \
   -- -include clc/clc.h -std=cl1.2 $@ \
-  1> "$PREPROCED" 2>> "$CCLOG" && prettify "$PREPROCED"
+  1> "$INLINED" 2>> "$CCLOG"
 
 # Failed
 if [ ! "$?" -eq 0 ]; then
@@ -87,7 +97,7 @@ fi
 # Rename inlined source
 print_banner 'Rename stage' >> "$CCLOG"
 
-"$RENAME_LST_GEN" "$PREPROCED" \
+"$RENAME_LST_GEN" "$INLINED" \
   -- -include clc/clc.h -std=cl1.2 $@ \
   1> "$RENAME_LST" 2>> "$CCLOG"
 
@@ -99,7 +109,7 @@ fi
 
 # Don't do shit if it gens nothin'
 if [ "$(stat -c '%s' "$RENAME_LST")" -gt 0 ]; then
-  "$CLANG_RENAME" -input "$RENAME_LST" "$PREPROCED" \
+  "$CLANG_RENAME" -input "$RENAME_LST" "$INLINED" \
     -- -include clc/clc.h -std=cl1.2 $@ \
     1> "$RENAMED" 2>> "$CCLOG"
   # Failed
@@ -133,4 +143,4 @@ fi
 # Stage 4
 # Clean up
 rm -f "$ORIGINAL" "$INLINED" "$RENAME_LST" "$RENAMED" "$INSTRED" "$PROFLIST" \
-      "$CCLOG"
+      "$CCLOG" "$PREPROCED"

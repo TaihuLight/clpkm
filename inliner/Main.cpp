@@ -42,10 +42,8 @@ using CodeCache = std::unordered_map<FunctionDecl*, CodeSnippet>;
 
 class Extractor : public RecursiveASTVisitor<Extractor> {
 public:
-	Extractor(CallSiteTable& CST, RetStmtTable& RST, CompilerInstance& CI) :
-		TheCST(CST), TheRST(RST), TheCI(CI), TheFunction(nullptr) {
-
-		}
+	Extractor(CallSiteTable& CST, RetStmtTable& RST, CompilerInstance& CI)
+	: TheCST(CST), TheRST(RST), TheCI(CI), TheFunction(nullptr) { }
 
 	bool VisitGotoStmt(GotoStmt* GS) {
 
@@ -244,13 +242,16 @@ private:
 			SourceLocation RSLocStart = ExpandStartLoc(RS->getLocStart());
 			SourceLocation RSLocEnd = ExpandEndLoc(RS->getLocEnd());
 
-			CS.emplace_back(InlinerRewriter.getRewrittenText({Front, RSLocStart.getLocWithOffset(-1)}));
-			CS.emplace_back(InlinerRewriter.getRewrittenText({RSLocStart.getLocWithOffset(6), RSLocEnd}));
+			CS.emplace_back(InlinerRewriter.getRewrittenText(
+					{Front, RSLocStart.getLocWithOffset(-1)}));
+			CS.emplace_back(InlinerRewriter.getRewrittenText(
+					{RSLocStart.getLocWithOffset(6), RSLocEnd}));
 			Front = ExpandEndLoc(RS->getStmtLocEnd());
 
 			}
 
-		CS.emplace_back(InlinerRewriter.getRewrittenText({Front, ExpandEndLoc(FuncDecl->getBody()->getLocEnd())}));
+		CS.emplace_back(InlinerRewriter.getRewrittenText(
+				{Front, ExpandEndLoc(FuncDecl->getBody()->getLocEnd())}));
 		CC.emplace(FuncDecl, std::move(CS));
 
 		return true;
@@ -259,32 +260,32 @@ private:
 
 	bool PerformInline(FunctionDecl* FuncDecl, std::vector<FunctionDecl*>& CallChain) {
 
+		auto& Diag = getCompilerInstance().getDiagnostics();
+
 		if (!FuncDecl->hasBody()) {
-
-			llvm::errs() << "Skipping declaration without body \""
-			             << FuncDecl->getNameInfo().getName().getAsString()
-			             << "\"\n";
+			auto DiagID = Diag.getCustomDiagID(DiagnosticsEngine::Level::Note,
+			                                   "skipping declaration");
+			Diag.Report(FuncDecl->getNameInfo().getLoc(), DiagID);
 			return true;
-
 			}
 
 		if (auto It = std::find(CallChain.begin(), CallChain.end(), FuncDecl);
 		    It != CallChain.end()) {
 
-			auto& Diag = getCompilerInstance().getDiagnostics();
-			auto ErrDiagID = Diag.getCustomDiagID(DiagnosticsEngine::Level::Error, "%0");
+			auto ErrDiagID = Diag.getCustomDiagID(DiagnosticsEngine::Level::Error,
+			                                      "recursion detected");
 			auto NoteDiagID = Diag.getCustomDiagID(DiagnosticsEngine::Level::Note, "call chain: %0 -> %1%0");
 
 			std::string FuncName = FuncDecl->getNameInfo().getName().getAsString();
 			std::string Chain;
 
-			Diag.Report(FuncDecl->getNameInfo().getLoc(), ErrDiagID) << "recursion detected";
+			Diag.Report(FuncDecl->getNameInfo().getLoc(), ErrDiagID);
 
 			for (auto CalledFunc = CallChain.rbegin();
 			     *CalledFunc != FuncDecl; ++CalledFunc) {
 
 				Chain = (*CalledFunc)->getNameInfo().getName().getAsString() +
-				        " -> " + std::move(Chain);
+				         " -> " + std::move(Chain);
 
 				}
 
@@ -336,12 +337,12 @@ private:
 			// its source range, we need the good ol' trick of macro magic
 			while (++Next != CCRecord->second.end()) {
 
-				Replace += *It + "do { ";
+				Replace += *It + " do { ";
 
 				if (!RetType->isVoidType())
 					Replace += RetVar + " = " + *Next + "; ";
 
-				Replace += "goto " + ExitLabel + "; } while (0)";
+				Replace += " goto " + ExitLabel + "; } while (0)";
 
 				It = ++Next;
 
@@ -358,7 +359,7 @@ private:
 				Replace = InlinerRewriter.getRewrittenText(ExpandRange((*ParamIt)->getSourceRange())) +
 				          " = " +
 				          InlinerRewriter.getRewrittenText(ExpandRange((*ArgIt)->getSourceRange())) +
-				          ";" + std::move(Replace);
+				          "; " + std::move(Replace);
 
 				++ArgIt;
 				++ParamIt;
@@ -375,8 +376,8 @@ private:
 
 			// Locally declared labels from GNU extension
 			// Must be placed at the beginning of a block
-			Replace = "({ __label__ " + ExitLabel + "; " +
-			          std::move(Replace) + "})";
+			Replace = " ({ __label__ " + ExitLabel + "; " +
+			          std::move(Replace) + " }) ";
 
 			InlinerRewriter.ReplaceText(ExpandRange(CE->getSourceRange()),
 			                            Replace);
