@@ -148,6 +148,9 @@ void CLPKM::MetaEnqueue(CallbackData* Work, cl_uint NumWaiting,
 	OCL_ASSERT(Ret);
 
 	// Set up callback to continue
+	// Note: This could lead to a problem! clSetEventCallback is a blocking call
+	//       under some systems, e.g. mesa. In such case, this call will only
+	//       return when the event is ready
 	Ret = Lookup<OclAPI::clSetEventCallback>()(
 			EventRead.get(), CL_COMPLETE, ResumeOrFinish, Work);
 	OCL_ASSERT(Ret);

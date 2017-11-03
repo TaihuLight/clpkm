@@ -27,7 +27,7 @@ function prettify() {
 function prettify_to {
   "$CLANG_FORMAT" -style=llvm "$1" > "$2" && \
   rm "$1"
-  }
+}
 
 # Clang tools
 CLANG_ROOT="$HOME"/llvm-5.0.1-rev/clang-rel
