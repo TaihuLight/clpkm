@@ -228,6 +228,10 @@ void CL_CALLBACK CLPKM::ResumeOrFinish(cl_event Event, cl_int ExecStatus,
 
 	// If finished
 	if (Progress == 0) {
+
+		RT.Log(RuntimeKeeper::loglevel::INFO,
+		       "==CLPKM== Task finished\n");
+
 		Ret = Lookup<OclAPI::clSetUserEventStatus>()(Work->Final.get(), CL_COMPLETE);
 		// Note: if the call failed here, following commands are likely to get
 		//       stuck forever...
@@ -236,6 +240,9 @@ void CL_CALLBACK CLPKM::ResumeOrFinish(cl_event Event, cl_int ExecStatus,
 		CallbackCleanup(Work);
 		return;
 		}
+
+	RT.Log(RuntimeKeeper::loglevel::INFO,
+	       "==CLPKM== Task yet finished\n");
 
 	// Step 3
 	// If yet finished, setting up following run

@@ -535,7 +535,14 @@ cl_int clEnqueueNDRangeKernel(cl_command_queue Queue,
 	KernelWrap.get() = NULL;
 	Work.release();
 
-	return clFinish(Queue);
+	// Note: Some application keeps enqueuing task without calling clFinish or so
+	//       If the capacity of underlying queue implementation is fixed, and
+	//       all OpenCL queues share a real queue, immediately return here for
+	//       applications could result in dead lock
+	//       Make a call to clFinish could workaround the problem, since it won't
+	//       bloat the queue anymore
+	//return clFinish(Queue);
+	return CL_SUCCESS;
 
 	}
 catch (const __ocl_error& OclError) {

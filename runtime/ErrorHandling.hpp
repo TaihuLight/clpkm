@@ -62,7 +62,7 @@ private:
 			__clpkm_rt.Log(__fatal, \
 			               "==CLPKM==   " __VA_ARGS__); \
 			__clpkm_rt.Log(__fatal, "\n"); \
-			std::terminate(); \
+			std::abort(); \
 			} \
 		} while (0)
 
