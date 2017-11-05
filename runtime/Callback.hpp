@@ -11,6 +11,7 @@
 #include "ResourceGuard.hpp"
 #include "RuntimeKeeper.hpp"
 #include <chrono>
+#include <mutex>
 #include <string>
 #include <vector>
 #include <CL/opencl.h>
@@ -33,7 +34,8 @@ struct CallbackData {
 	  GWO(std::move(IGWO)), GWS(std::move(IGWS)), LWS(std::move(ILWS)), WorkGrpSize(IWGS),
 	  DeviceHeader(std::move(DH)), LocalBuffer(std::move(LB)), PrivateBuffer(std::move(PB)),
 	  HostMetadata(std::move(HM)), HeaderOffset(HO), PrevWork{NULL, std::move(E)},
-	  Final(std::move(F)), LastCall(TP), Counter(0) { }
+	  Final(std::move(F)), LastCall(TP), Counter(0),
+	  Mutex(std::make_unique<std::recursive_mutex>()) { }
 
 	// Shadow queue and kernel to run
 	cl_command_queue Queue;
@@ -71,6 +73,8 @@ struct CallbackData {
 	// Profiling related stuff
 	std::chrono::high_resolution_clock::time_point LastCall;
 	unsigned Counter;
+
+	std::unique_ptr<std::recursive_mutex> Mutex;
 
 	};
 

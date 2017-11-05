@@ -110,12 +110,20 @@ void CallbackCleanup(CallbackData* Work) {
 
 	KernelInfo& KInfo = *Work->KInfo;
 
-	std::unique_lock<std::mutex> Lock(*KInfo.Mutex);
+	// Wait for other thread involving with this work to finish
+	// Note: If clSetEventCallback blocks upon an event, this cannot help!
+	std::unique_lock<std::recursive_mutex> LockWork(*Work->Mutex);
+
+	// Return the kernel to kernel pool
+	std::unique_lock<std::mutex> LockPool(*KInfo.Mutex);
 
 	KInfo.Pool.emplace_back(std::move(Work->Kernel));
 
-	Lock.unlock();
-	Lock.release();
+	// Unlock and disassociate
+	LockPool.unlock();
+	LockPool.release();
+
+	LockWork.release();
 
 	delete Work;
 
@@ -129,6 +137,7 @@ void CLPKM::MetaEnqueue(CallbackData* Work, cl_uint NumWaiting,
                         cl_event* WaitingList) {
 
 	clEvent EventRead(NULL);
+	std::unique_lock<std::recursive_mutex> LockWork(*Work->Mutex);
 
 	// Enqueue kernel and read data
 	cl_int Ret = Lookup<OclAPI::clEnqueueNDRangeKernel>()(
@@ -169,10 +178,12 @@ void CLPKM::MetaEnqueue(CallbackData* Work, cl_uint NumWaiting,
 void CL_CALLBACK CLPKM::ResumeOrFinish(cl_event Event, cl_int ExecStatus,
                                        void* UserData) try {
 
-	auto* Work = static_cast<CallbackData*>(UserData);
-	clEvent ThisEvent(Event);
+	auto*  Work = static_cast<CallbackData*>(UserData);
+	auto&  RT = getRuntimeKeeper();
 	cl_int Ret = CL_SUCCESS;
-	auto& RT = getRuntimeKeeper();
+
+	clEvent ThisEvent(Event);
+	std::unique_lock<std::recursive_mutex> LockWork(*Work->Mutex);
 
 	// Update timestamp
 	auto Now = std::chrono::high_resolution_clock::now();
@@ -221,6 +232,7 @@ void CL_CALLBACK CLPKM::ResumeOrFinish(cl_event Event, cl_int ExecStatus,
 		// Note: if the call failed here, following commands are likely to get
 		//       stuck forever...
 		INTER_ASSERT(Ret == CL_SUCCESS, "failed to set user event status");
+		LockWork.release();
 		CallbackCleanup(Work);
 		return;
 		}
