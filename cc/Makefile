@@ -2,13 +2,13 @@ CXX         := clang++
 LLVM_CONFIG := llvm-config
 
 CXXFLAGS := -Wall -Wextra $(shell $(LLVM_CONFIG) --cxxflags)
-LDFLAGS  := $(shell $(LLVM_CONFIG) --ldflags)
+LDFLAGS  := -fuse-ld=lld $(shell $(LLVM_CONFIG) --ldflags)
 LIBS     := -Wl,--start-group $(shell $(LLVM_CONFIG) --libs) \
             -lclangAST -lclangAnalysis -lclangBasic -lclangCodeGen \
-            -lclangDriver -lclangEdit -lclangFrontend -lclangFrontendTool \
-            -lclangIndex -lclangLex -lclangParse -lclangRewrite -lclangSema \
-            -lclangSerialization -lclangToolingCore -lclangTooling \
-            -lclangFormat -lclangRewrite -lclangASTMatchers -Wl,--end-group
+            -lclangDriver -lclangEdit -lclangFormat -lclangFrontend \
+            -lclangFrontendTool -lclangIndex -lclangLex -lclangParse \
+            -lclangRewrite -lclangSema -lclangSerialization -lclangTooling \
+            -lclangToolingCore -Wl,--end-group
 
 TARGET   := clpkmcc
 SRCS     := $(wildcard *.cpp)
