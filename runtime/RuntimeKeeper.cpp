@@ -49,6 +49,8 @@ struct DefaultLoader : public CLPKM::RuntimeKeeper::ConfigLoader {
 				ConfigLoader::setLogLevel(RT, CLPKM::RuntimeKeeper::loglevel::ERROR);
 			else if (strcmp(LogLevel, "info") == 0)
 				ConfigLoader::setLogLevel(RT, CLPKM::RuntimeKeeper::loglevel::INFO);
+			else if (strcmp(LogLevel, "debug") == 0)
+				ConfigLoader::setLogLevel(RT, CLPKM::RuntimeKeeper::loglevel::DEBUG);
 			}
 
 		return true;

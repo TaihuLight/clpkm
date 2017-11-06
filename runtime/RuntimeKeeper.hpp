@@ -100,6 +100,7 @@ public:
 		FATAL = 0,
 		ERROR,
 		INFO,
+		DEBUG,
 		NUM_OF_LOGLEVEL
 		};
 
