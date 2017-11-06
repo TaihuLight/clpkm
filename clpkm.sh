@@ -14,9 +14,27 @@ Introduction
 COMMENT
 
 function print_banner() {
-  echo -e '\n====================' &&
-  echo " $1" &&
-  echo '===================='
+  echo "-   $1:"
+}
+
+function dump_diag() {
+  while read LINE; do
+    # Skip empty line
+    if [[ -z "$LINE" ]]; then
+      echo ''
+      continue
+    fi
+    # Don't pad banner
+    if [[ -n "$(echo "$LINE" | grep '^-   .*:$')" ]]; then
+      echo "$LINE"
+      continue
+    fi
+    # Pad log
+    while [[ -n "$LINE" ]]; do
+      echo "    ${LINE:0:76}"
+      LINE="${LINE:76}"
+    done
+  done < "$1" 1>&2
 }
 
 function prettify() {
@@ -76,7 +94,7 @@ prettify "$PREPROCED" && \
 
 # Failed
 if [ ! "$?" -eq 0 ]; then
-  cat "$CCLOG" 1>&2
+  dump_diag "$CCLOG"
   exit 1
 fi
 
@@ -88,7 +106,7 @@ print_banner 'Inline stage' >> "$CCLOG"
 
 # Failed
 if [ ! "$?" -eq 0 ]; then
-  cat "$CCLOG" 1>&2
+  dump_diag "$CCLOG"
   exit 1
 fi
 # COMMENT_OUT_TO_ENABLE_PREPROCESS
@@ -103,7 +121,7 @@ print_banner 'Rename stage' >> "$CCLOG"
 
 # Failed
 if [ ! "$?" -eq 0 ]; then
-  cat "$CCLOG" 1>&2
+  dump_diag "$CCLOG"
   exit 1
 fi
 
@@ -114,7 +132,7 @@ if [ "$(stat -c '%s' "$RENAME_LST")" -gt 0 ]; then
     1> "$RENAMED" 2>> "$CCLOG"
   # Failed
   if [ ! "$?" -eq 0 ]; then
-    cat "$CCLOG" 1>&2
+    dump_diag "$CCLOG"
     exit 1
   fi
 fi
@@ -130,7 +148,7 @@ print_banner 'Instrument stage' >> "$CCLOG"
 
 # Failed
 if [ ! "$?" -eq 0 ]; then
-  cat "$CCLOG" 1>&2
+  dump_diag "$CCLOG"
   exit 1
 # Succeed
 else

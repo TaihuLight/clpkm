@@ -199,6 +199,13 @@ cl_int clBuildProgram(cl_program Program,
 	// Now invoke CLPKMCC
 	if (!CLPKM::Compile(Source, Options, PL)) {
 
+		RT.Log(RuntimeKeeper::loglevel::DEBUG,
+		       "==CLPKM== Build program failed! Build log:\n"
+		       "------------[ cut here ]------------\n"
+		       "%s\n"
+		       "------------[ cut here ]------------\n",
+		       Source.c_str());
+
 		// Build log is put in source
 		ProgramInfo NewEntry(Context, NULL, std::move(Source), ProfileList());
 
