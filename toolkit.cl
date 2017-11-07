@@ -123,22 +123,43 @@ void __get_linear_id(size_t * __global_id, size_t * __group_id,
 //
 // CR-related stuff
 //
-#if 0
+#if 1
 ulong clock64(void) {
-  ulong clock_val;
+  ulong __clock_val;
   asm volatile ("mov.u64 %0, %%clock64;"
-               : /* output */ "=l"(clock_val)
+               : /* output */ "=l"(__clock_val)
                : /* input */
-               : /* clobbers */ "memory");
-  return clock_val;
+               : /* clobbers */ // "memory"
+               );
+  return __clock_val;
+}
+ulong clock32_lo(void) {
+  uint __clock_val;
+  asm volatile ("mov.u32 %0, %%clock;"
+               : /* output */ "=r"(__clock_val)
+               : /* input */
+               : /* clobbers */ // "memory"
+               );
+  return __clock_val;
+}
+ulong clock32_hi(void) {
+  uint __clock_val;
+  asm volatile ("mov.u32 %0, %%clock_hi;"
+               : /* output */ "=r"(__clock_val)
+               : /* input */
+               : /* clobbers */ // "memory"
+               );
+  return __clock_val;
 }
 #endif
 void __clpkm_init_cost_ctr(uint * __cost_ctr, const uint __clpkm_tlv) {
-  * __cost_ctr = 0;
+  //* __cost_ctr = 0;
+  * __cost_ctr = clock64() + __clpkm_tlv;
 }
 void __clpkm_update_ctr(uint * __cost_ctr, uint __esti_cost) {
-  * __cost_ctr += __esti_cost;
+  //* __cost_ctr += __esti_cost;
 }
 bool __clpkm_should_chkpnt(uint __cost_ctr, uint __clpkm_tlv) {
-  return __cost_ctr > __clpkm_tlv;
+  //return __cost_ctr > __clpkm_tlv;
+  return clock64() > __cost_ctr;
 }
