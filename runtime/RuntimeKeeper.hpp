@@ -118,10 +118,19 @@ public:
 	const std::string& getCompilerPath() const { return CompilerPath; }
 	tlv_t getCRThreshold() const { return Threshold; }
 
+	bool shouldLog(loglevel Level) const {
+		return (LogLevel >= Level);
+		}
+
+	template <class ... T>
+	void Log(T&& ... FormatStr) {
+		fprintf(stderr, FormatStr...);
+		}
+
 	template <class ... T>
 	void Log(loglevel Level, T&& ... FormatStr) {
-		if (LogLevel >= Level)
-			fprintf(stderr, FormatStr...);
+		if (shouldLog(Level))
+			Log(FormatStr...);
 		}
 
 	class ConfigLoader {

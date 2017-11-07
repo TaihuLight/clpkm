@@ -239,8 +239,51 @@ cl_int clBuildProgram(cl_program Program,
 	INTER_ASSERT(It.second, "insertion to program table didn't take place");
 
 	// Call the vendor's impl to build the instrumented code
-	return Lookup<OclAPI::clBuildProgram>()(
+	Ret = Lookup<OclAPI::clBuildProgram>()(
 			RawShadowProgram, NumOfDevice, DeviceList, Options, Notify, UserData);
+
+	// Return immediately if not in debug mode
+	if (!RT.shouldLog(RuntimeKeeper::loglevel::DEBUG))
+		return Ret;
+
+	// Do not try to retrieve device list here because it seems to be expensive
+	if (!DeviceList) {
+		RT.Log("==CLPKM== Device list not specified, skipping logging build log\n");
+		return Ret;
+		}
+
+	size_t LogLength = 0;
+	std::string VendorLog;
+
+	cl_int DRet = Lookup<OclAPI::clGetProgramBuildInfo>()(
+			RawShadowProgram, DeviceList[0], CL_PROGRAM_BUILD_LOG,
+			0, nullptr, &LogLength);
+
+	if (DRet != CL_SUCCESS) {
+		RT.Log("==CLPKM== Failed to query size of vendor build log, ret %"
+		       PRId32 "\n", DRet);
+		return Ret;
+		}
+
+	VendorLog.resize(LogLength, '\0');
+
+	DRet = Lookup<OclAPI::clGetProgramBuildInfo>()(
+			RawShadowProgram, DeviceList[0], CL_PROGRAM_BUILD_LOG,
+			LogLength, VendorLog.data(), nullptr);
+
+	if (DRet != CL_SUCCESS) {
+		RT.Log("==CLPKM== Failed to retrieve vendor build log, ret %" PRId32 "\n",
+		       DRet);
+		return Ret;
+		}
+
+	RT.Log("==CLPKM== Vendor compiler build log:\n"
+	       "------------[ cut here ]------------\n"
+	       "%s\n"
+	       "------------[ cut here ]------------\n",
+	       VendorLog.c_str());
+
+	return Ret;
 
 	}
 catch (const __ocl_error& OclError) {
