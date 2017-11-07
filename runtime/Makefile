@@ -1,5 +1,4 @@
-CXX         = g++
-LLVM_CONFIG = llvm-config
+CXX = g++
 
 CXXFLAGS = -Wall -Wextra -pedantic -fstack-protector-strong -g3 \
            -DCL_USE_DEPRECATED_OPENCL_1_2_APIS -Wno-ignored-attributes \
@@ -7,9 +6,9 @@ CXXFLAGS = -Wall -Wextra -pedantic -fstack-protector-strong -g3 \
 LDFLAGS  = -Wl,-O1,--sort-common,--as-needed,-z,relro,-z,now # -s
 LIBS     = -lyaml-cpp -lOpenCL -ldl -lboost_thread
 
-TARGET   := libclpkm.so
-SRCS     := $(wildcard *.cpp)
-OBJS     := ${SRCS:%.cpp=%.o}
+TARGET := libclpkm.so
+SRCS   := $(wildcard *.cpp)
+OBJS   := ${SRCS:%.cpp=%.o}
 
 all: $(TARGET)
 

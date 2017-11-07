@@ -233,7 +233,7 @@ bool Instrumentor::TraverseFunctionDecl(FunctionDecl* FuncDecl) {
 	const char* CLPKMParam = ", __global int * restrict __clpkm_metadata, "
 	                         "__global char * restrict __clpkm_local, "
 	                         "__global char * restrict __clpkm_prv, "
-	                         "__const uint __clpkm_tlv";
+	                         "const uint __clpkm_tlv";
 
 	TheRewriter.InsertTextAfterToken(InsertCut, CLPKMParam);
 
@@ -303,11 +303,12 @@ bool Instrumentor::TraverseFunctionDecl(FunctionDecl* FuncDecl) {
 		FuncDecl->getBody()->getLocStart(),
 		"\n  __global const uint* __clpkm_dloc_sz_tbl = (__global uint*) __clpkm_metadata;\n"
 		"  __global int* __clpkm_hdr = __clpkm_metadata + " + std::to_string(PLEntry.LocPtrParamIdx.size()) + ";\n"
+		"  uint __clpkm_ctr = 0; // cost counter\n"
+		"  __clpkm_init_cost_ctr(&__clpkm_ctr, __clpkm_tlv);\n"
 		"  size_t __clpkm_id = 0; // global work-item id \n"
 		"  size_t __clpkm_grp_id = 0; // work-group id \n"
 		"  size_t __clpkm_loc_id = 0; // local work-item id\n"
 		"  size_t __clpkm_grp_size = 0; // work-group size \n"
-		"  uint __clpkm_ctr = 0; // cost counter\n"
 		"  // Compute linear IDs and adjust live value buffer\n"
 		"  __get_linear_id(&__clpkm_id, &__clpkm_grp_id,\n"
 		"                  &__clpkm_loc_id, &__clpkm_grp_size);\n"
@@ -378,8 +379,8 @@ bool Instrumentor::PatchLoopBody(size_t OldCost, size_t NewCost,
 	Covfefe C = GenerateCovfefe(LVT.GenLivenessAfter(Body), ThePL.back());
 	std::string ThisNonce = std::to_string(++Nonce);
 	std::string InstCR =
-			" __clpkm_ctr += " + std::to_string(NewCost - OldCost) + ";"
-			" if (__clpkm_ctr > __clpkm_tlv) {"
+			" __clpkm_update_ctr(&__clpkm_ctr, " + std::to_string(NewCost - OldCost) + ");"
+			" if (__clpkm_should_chkpnt(__clpkm_ctr, __clpkm_tlv)) {"
 				" __clpkm_hdr[__clpkm_id] = " + ThisNonce + "; " +
 				std::move(C.first) + " goto __CLPKM_SV_LOC_AND_RET;"
 			" } if (0) case " + ThisNonce + ": {" +

@@ -121,7 +121,7 @@ void __get_linear_id(size_t * __global_id, size_t * __group_id,
 }
 
 //
-// Others
+// CR-related stuff
 //
 #if 0
 ulong clock64(void) {
@@ -133,3 +133,12 @@ ulong clock64(void) {
   return clock_val;
 }
 #endif
+void __clpkm_init_cost_ctr(uint * __cost_ctr, const uint __clpkm_tlv) {
+  * __cost_ctr = 0;
+}
+void __clpkm_update_ctr(uint * __cost_ctr, uint __esti_cost) {
+  * __cost_ctr += __esti_cost;
+}
+bool __clpkm_should_chkpnt(uint __cost_ctr, uint __clpkm_tlv) {
+  return __cost_ctr > __clpkm_tlv;
+}
