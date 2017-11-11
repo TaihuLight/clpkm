@@ -66,6 +66,8 @@ struct {
 // Runtime call this method on initialization
 int GetConfig(sd_bus_message *Msg, void *UserData, sd_bus_error *ErrorRet) {
 
+	(void) UserData;
+	(void) ErrorRet;
 	int Ret = 0;
 
 	Ret = sd_bus_message_read(Msg, "");
@@ -86,6 +88,8 @@ int GetConfig(sd_bus_message *Msg, void *UserData, sd_bus_error *ErrorRet) {
 int SetHighPrioProc(sd_bus_message* Msg, void* UserData,
                     sd_bus_error* ErrorRet) {
 
+	(void) UserData;
+	(void) ErrorRet;
 	auto& D = getDaemonKeeper();
 
 	// The flag indicates that the process want to set or clear run level
@@ -135,6 +139,8 @@ const sd_bus_vtable SchedSrvVTable[] = {
 int NameOwnerChangeWatcher(sd_bus_message* Msg, void* UserData,
                            sd_bus_error* ErrorRet) {
 
+	(void) UserData;
+	(void) ErrorRet;
 	auto& D = getDaemonKeeper();
 
 	const char* Name = nullptr;

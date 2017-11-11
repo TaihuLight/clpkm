@@ -6,7 +6,7 @@ CXXFLAGS = $(shell $(PKG_CONFIG) --cflags libsystemd) \
            -Wall -Wextra -pedantic -fstack-protector-strong -g3 \
            # -O2 -ftree-vectorize -fno-plt -flto
 LDFLAGS  = -Wl,-O1,--sort-common,--as-needed,-z,relro,-z,now # -s
-LIBS     = $(shell $(PKG_CONFIG) --libs libsystemd)
+LIBS     = $(shell $(PKG_CONFIG) --libs libsystemd) -lyaml-cpp
 
 TARGET   := clpkm-daemon
 SRCS     := $(wildcard *.cpp)
