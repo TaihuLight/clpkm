@@ -50,10 +50,9 @@ void ReloadConfig(int ) try {
 	LoadConfig();
 	}
 catch (const std::exception& E) {
-	getDaemonKeeper().Log(
-			DaemonKeeper::loglevel::ERROR,
-			"Failed to reload config: \"%s\"",
-			E.what());
+	getDaemonKeeper().Log(DaemonKeeper::loglevel::ERROR,
+	                      "Failed to reload config: \"%s\"",
+	                      E.what());
 	}
 
 // Task management related stuff
@@ -73,10 +72,9 @@ int GetConfig(sd_bus_message *Msg, void *UserData, sd_bus_error *ErrorRet) {
 	Ret = sd_bus_message_read(Msg, "");
 
 	if (Ret < 0) {
-		getDaemonKeeper().Log(
-				DaemonKeeper::loglevel::ERROR,
-				"GetConfig failed to read message: %s\n",
-				strerror(-Ret));
+		getDaemonKeeper().Log(DaemonKeeper::loglevel::ERROR,
+		                      "GetConfig failed to read message: %s\n",
+		                      strerror(-Ret));
 		}
 
 	return sd_bus_reply_method_return(
@@ -123,8 +121,6 @@ int SetHighPrioProc(sd_bus_message* Msg, void* UserData,
 
 	}
 
-/* The vtable of our little object, implements the net.poettering.Calculator
- * interface */
 const sd_bus_vtable SchedSrvVTable[] = {
 	SD_BUS_VTABLE_START(0),
 	SD_BUS_METHOD("GetConfig", "", "su", GetConfig,
@@ -150,10 +146,9 @@ int NameOwnerChangeWatcher(sd_bus_message* Msg, void* UserData,
 	int Ret = sd_bus_message_read(Msg, "sss", &Name, &OldOwner, &NewOwner);
 
 	if (Ret < 0) {
-		D.Log(
-				DaemonKeeper::loglevel::ERROR,
-				"NameOwnerWatcher failed to read message: %s\n",
-				strerror(-Ret));
+		D.Log(DaemonKeeper::loglevel::ERROR,
+		      "NameOwnerWatcher failed to read message: %s\n",
+		      strerror(-Ret));
 		return Ret;
 		}
 
@@ -213,10 +208,8 @@ int main(int ArgCount, const char* ArgVar[]) {
 		return -1;
 		}
 
-	int Ret = 0;
-
-	sdBus        Bus = nullptr;
-	sdBusMessage Msg = nullptr;
+	int   Ret = 0;
+	sdBus Bus = nullptr;
 
 	// Set up bus
 	if (!strcmp(ArgVar[2], "system"))
@@ -289,8 +282,7 @@ int main(int ArgCount, const char* ArgVar[]) {
 	// Main loop
 	while (true) {
 
-		sdBusMessage Msg = nullptr;
-		Ret = sd_bus_process(Bus.get(), &Msg.get());
+		Ret = sd_bus_process(Bus.get(), nullptr);
 
 		if (Ret < 0) {
 			D.Log(DaemonKeeper::loglevel::FATAL,
@@ -331,8 +323,7 @@ int main(int ArgCount, const char* ArgVar[]) {
 
 		if (Ret < 0) {
 			D.Log(DaemonKeeper::loglevel::FATAL,
-			      "Failed to wait on bus: %s\n",
-			      strerror(-Ret));
+			      "Failed to wait on bus: %s\n", strerror(-Ret));
 			break;
 			}
 
