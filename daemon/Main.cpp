@@ -235,8 +235,10 @@ int main(int ArgCount, const char* ArgVar[]) {
 		}
 
 	// Daemonize if run on deamon mode
-	if (!strcmp(ArgVar[1], "daemon") && D.Daemonize())
-		return -1;
+	if (!strcmp(ArgVar[1], "daemon")) {
+		if (D.Daemonize())
+			return -1;
+		}
 	else if (strcmp(ArgVar[1], "terminal")) {
 		D.Log(DaemonKeeper::loglevel::FATAL,
 		      "\"%s\" is not a valid run mode!\n", ArgVar[1]);
