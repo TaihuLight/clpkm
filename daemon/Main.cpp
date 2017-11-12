@@ -46,12 +46,14 @@ void LoadConfig(void) {
 	}
 
 // Handler for SIGHUP to reload config file
-void ReloadConfig(int ) try {
+void ReloadConfig(int Signal) try {
+	getDaemonKeeper().Log(DaemonKeeper::loglevel::INFO,
+	                      "Reloading config on signal %d\n", Signal);
 	LoadConfig();
 	}
 catch (const std::exception& E) {
 	getDaemonKeeper().Log(DaemonKeeper::loglevel::ERROR,
-	                      "Failed to reload config: \"%s\"",
+	                      "Failed to reload config: \"%s\"\n",
 	                      E.what());
 	}
 
@@ -59,8 +61,15 @@ catch (const std::exception& E) {
 
 // Helper struct for task manager because I'm lazy again
 struct {
+	bool IsOnTerminate;
 	std::unordered_set<std::string> HighPrioSet;
 	} Task;
+
+void OnTerminate(int Signal) {
+	getDaemonKeeper().Log(DaemonKeeper::loglevel::INFO,
+	                      "Shutting down on signal %d\n", Signal);
+	Task.IsOnTerminate = true;
+	}
 
 // Runtime call this method on initialization
 int GetConfig(sd_bus_message *Msg, void *UserData, sd_bus_error *ErrorRet) {
@@ -78,7 +87,8 @@ int GetConfig(sd_bus_message *Msg, void *UserData, sd_bus_error *ErrorRet) {
 		}
 
 	return sd_bus_reply_method_return(
-			Msg, "st", GblConfig.CompilerPath.c_str(), GblConfig.Threshold);
+			Msg, "stb", GblConfig.CompilerPath.c_str(), GblConfig.Threshold,
+			Task.HighPrioSet.size() > 0);
 
 	}
 
@@ -123,7 +133,7 @@ int SetHighPrioProc(sd_bus_message* Msg, void* UserData,
 
 const sd_bus_vtable SchedSrvVTable[] = {
 	SD_BUS_VTABLE_START(0),
-	SD_BUS_METHOD("GetConfig", "", "su", GetConfig,
+	SD_BUS_METHOD("GetConfig", "", "stb", GetConfig,
 	              SD_BUS_VTABLE_UNPRIVILEGED),
 	SD_BUS_METHOD("SetHighPrioProc", "b", "b", SetHighPrioProc,
 	              // FIXME: should not be unprivileged!
@@ -197,11 +207,13 @@ int main(int ArgCount, const char* ArgVar[]) {
 		return -1;
 		}
 
+	Task.IsOnTerminate = false;
+
 	// Set up signal handlers
-	// Don't handle SIGTERM
 	if (signal(SIGINT, SIG_IGN) == SIG_ERR
 	 || signal(SIGQUIT, SIG_IGN) == SIG_ERR
 	 || signal(SIGHUP, ReloadConfig) == SIG_ERR
+	 || signal(SIGTERM, OnTerminate) == SIG_ERR
 	 || signal(SIGPIPE, SIG_IGN) == SIG_ERR) {
 		D.Log(DaemonKeeper::loglevel::FATAL,
 		      "Failed to set signal handler: %s\n", strerror(errno));
@@ -280,7 +292,7 @@ int main(int ArgCount, const char* ArgVar[]) {
 	bool HighPrioRunning = false;
 
 	// Main loop
-	while (true) {
+	while (!Task.IsOnTerminate) {
 
 		Ret = sd_bus_process(Bus.get(), nullptr);
 
@@ -319,13 +331,23 @@ int main(int ArgCount, const char* ArgVar[]) {
 
 			}
 
-		Ret = sd_bus_wait(Bus.get(), static_cast<uint64_t>(-1));
+		Ret = sd_bus_flush(Bus.get());
 
 		if (Ret < 0) {
+			D.Log(DaemonKeeper::loglevel::FATAL,
+			      "Failed to flush the bus: %s\n", strerror(-Ret));
+			break;
+			}
+
+		Ret = sd_bus_wait(Bus.get(), static_cast<uint64_t>(-1));
+
+		if (Ret < 0 && Ret != -EINTR) {
 			D.Log(DaemonKeeper::loglevel::FATAL,
 			      "Failed to wait on bus: %s\n", strerror(-Ret));
 			break;
 			}
+
+		Ret = 0;
 
 		} // Main loop
 

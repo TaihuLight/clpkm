@@ -43,7 +43,7 @@ struct Finalizer<sd_bus_slot> {
 template <>
 struct Finalizer<sd_bus> {
 	sd_bus* Finalize(sd_bus* Bus) {
-		return sd_bus_unref(Bus);
+		return sd_bus_flush_close_unref(Bus);
 		}
 	};
 
