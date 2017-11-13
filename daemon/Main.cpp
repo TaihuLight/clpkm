@@ -157,14 +157,13 @@ int NameOwnerChangeWatcher(sd_bus_message* Msg, void* UserData,
 
 	if (Ret < 0) {
 		D.Log(DaemonKeeper::loglevel::ERROR,
-		      "NameOwnerWatcher failed to read message: %s\n",
+		      "NameOwnerChangeWatcher failed to read message: %s\n",
 		      strerror(-Ret));
 		return Ret;
 		}
 
 	D.Log(DaemonKeeper::loglevel::DEBUG,
-	      "NameOwnerChanged\n  "
-	      "name: \"%s\"\n  old_owner: \"%s\"\n  new_owner: \"%s\"\n",
+	      "Name \"%s\" owner changed: \"%s\" -> \"%s\"\n",
 	      Name, OldOwner, NewOwner);
 
 	// If the released name was owned by a high priority process, remove it from
@@ -236,8 +235,8 @@ int main(int ArgCount, const char* ArgVar[]) {
 
 	// Daemonize if run on deamon mode
 	if (!strcmp(ArgVar[1], "daemon")) {
-		if (D.Daemonize())
-			return -1;
+		if (int ErrNo = D.Daemonize())
+			return ErrNo;
 		}
 	else if (strcmp(ArgVar[1], "terminal")) {
 		D.Log(DaemonKeeper::loglevel::FATAL,
