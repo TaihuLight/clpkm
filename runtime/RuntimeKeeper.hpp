@@ -115,9 +115,6 @@ public:
 	auto& getPTLock() { return PTLock; }
 	auto& getKTLock() { return KTLock; }
 
-	const std::string& getCompilerPath() const { return CompilerPath; }
-	tlv_t getCRThreshold() const { return Threshold; }
-
 	bool shouldLog(loglevel Level) const {
 		return (LogLevel >= Level);
 		}
@@ -133,49 +130,12 @@ public:
 			Log(FormatStr...);
 		}
 
-	class ConfigLoader {
-	protected:
-		static void setPriority(CLPKM::RuntimeKeeper& RT, priority P) {
-			RT.setPriority(P);
-			}
-		static void setLogLevel(CLPKM::RuntimeKeeper& RT, loglevel L) {
-			RT.setLogLevel(L);
-			}
-		static void setCompilerPath(CLPKM::RuntimeKeeper& RT, std::string&& Path) {
-			RT.setCompilerPath(std::move(Path));
-			}
-		static void setCRThreshold(CLPKM::RuntimeKeeper& RT, tlv_t T) {
-			RT.setCRThreshold(T);
-			}
-
-	public:
-		virtual bool operator()(RuntimeKeeper& ) const = 0;
-		virtual ~ConfigLoader() { }
-
-		};
-
 private:
 	RuntimeKeeper(const RuntimeKeeper& ) = delete;
 	RuntimeKeeper& operator=(const RuntimeKeeper& ) = delete;
 
 	// Internal functions
-	// Default parameters
-	RuntimeKeeper()
-	: Priority(LOW), LogLevel(FATAL), PT(), KT(), EL(),
-	  CompilerPath("/usr/bin/clpkm.sh"), Threshold(1000000) { }
-
-	RuntimeKeeper(const ConfigLoader& CL)
-	: RuntimeKeeper() {
-		if(!CL(*this)) {
-			this->Log(loglevel::FATAL, "\n==CLPKM== Failed to load config\n");
-			std::terminate();
-			}
-		}
-
-	void setPriority(priority P) { Priority = P; }
-	void setLogLevel(loglevel L) { LogLevel = L; }
-	void setCompilerPath(std::string&& Path) { CompilerPath = std::move(Path); }
-	void setCRThreshold(tlv_t T) { Threshold = T; }
+	RuntimeKeeper();
 
 	// Internal status
 	priority Priority;
@@ -193,13 +153,8 @@ private:
 	boost::upgrade_mutex PTLock;
 	boost::upgrade_mutex KTLock;
 
-	// Config stuff
-	std::string CompilerPath;
-	tlv_t       Threshold;
-
 	// Wa-i! Sugo-i! Tanoshi-!
 	friend RuntimeKeeper& getRuntimeKeeper(void);
-	friend class ConfigLoader;
 
 	};
 
