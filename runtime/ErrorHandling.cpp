@@ -10,7 +10,7 @@
 
 
 
-std::string StrError(int ErrorNum) {
+std::string CLPKM::StrError(int ErrorNum) {
 	// FIXME: fixed size buffer
 	char ErrorMsg[1024] = {};
 #if (_POSIX_C_SOURCE >= 200112L || _XOPEN_SOURCE >= 600) && ! _GNU_SOURCE

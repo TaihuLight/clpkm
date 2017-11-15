@@ -86,9 +86,9 @@ void ScheduleService::StartBus() {
 	int Ret = 0;
 
 	if (IsOnSystemBus)
-		Ret = sd_bus_open_user(&Bus);
-	else
 		Ret = sd_bus_open_system(&Bus);
+	else
+		Ret = sd_bus_open_user(&Bus);
 	INTER_ASSERT(Ret >= 0, "failed to open bus: %s", StrError(-Ret).c_str());
 
 	// Only low priority tasks need to get config
