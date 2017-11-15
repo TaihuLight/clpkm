@@ -1,4 +1,5 @@
-CXX = g++
+CXX        := g++
+PKG_CONFIG := pkg-config
 
 CXXFLAGS = -Wall -Wextra -pedantic -fstack-protector-strong -g3 \
            -DCL_USE_DEPRECATED_OPENCL_1_2_APIS -Wno-ignored-attributes \
