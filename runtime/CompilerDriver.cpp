@@ -6,7 +6,8 @@
 */
 
 #include "CompilerDriver.hpp"
-#include "RuntimeKeeper.hpp"
+#include "ErrorHandling.hpp"
+#include "ScheduleService.hpp"
 
 #include <cstring>
 #include <vector>
@@ -28,16 +29,6 @@ namespace {
 			Fd = -1;
 			}
 		return Succeed;
-		}
-	std::string StrError(int ErrorNum) {
-		// FIXME: fixed size buffer
-		char ErrorMsg[1024] = {};
-#if (_POSIX_C_SOURCE >= 200112L || _XOPEN_SOURCE >= 600) && ! _GNU_SOURCE
-		strerror_r(ErrorNum, ErrorMsg, sizeof(ErrorMsg));
-		return ErrorMsg;
-#else
-		return strerror_r(ErrorNum, ErrorMsg, sizeof(ErrorMsg));
-#endif
 		}
 	ssize_t FullWrite(int Fd, const void* Buffer, size_t Size) {
 		const char* CharBuf = static_cast<const char*>(Buffer);
@@ -98,8 +89,8 @@ bool CLPKM::Compile(std::string& Source, const char* Options, ProfileList& PL) {
 		         !CloseFd(YamlPipe[0]) || !CloseFd(YamlPipe[1]))
 			ErrorMsg = StrError(errno);
 		// It won't return unless something went south
-		else if (execlp(CLPKM::getRuntimeKeeper().getCompilerPath().c_str(),
-		                CLPKM::getRuntimeKeeper().getCompilerPath().c_str(),
+		else if (execlp(CLPKM::getScheduleService().getCompilerPath().c_str(),
+		                CLPKM::getScheduleService().getCompilerPath().c_str(),
 		                Options, NULL) == -1)
 			ErrorMsg = StrError(errno);
 

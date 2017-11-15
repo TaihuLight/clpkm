@@ -90,21 +90,13 @@ using tlv_t = cl_uint;
 // Main class
 class RuntimeKeeper {
 public:
-	enum priority {
-		HIGH = 0,
-		LOW,
-		NUM_OF_PRIORITY
-		};
-
-	enum loglevel {
+	enum class loglevel : uint8_t {
 		FATAL = 0,
 		ERROR,
 		INFO,
 		DEBUG,
 		NUM_OF_LOGLEVEL
 		};
-
-	priority getPriority() const { return Priority; }
 
 	QueueTable&   getQueueTable() { return QT; }
 	ProgramTable& getProgramTable() { return PT; }
@@ -138,7 +130,6 @@ private:
 	RuntimeKeeper();
 
 	// Internal status
-	priority Priority;
 	loglevel LogLevel;
 
 	// Members

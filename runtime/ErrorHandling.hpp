@@ -11,6 +11,7 @@
 #include "RuntimeKeeper.hpp"
 #include <cinttypes>
 #include <exception>
+#include <string>
 #include <CL/opencl.h>
 
 
@@ -29,6 +30,8 @@ private:
 	cl_int __error_code;
 
 	};
+
+std::string StrError(int ErrorNum);
 
 }
 

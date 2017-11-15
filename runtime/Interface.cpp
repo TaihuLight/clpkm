@@ -14,6 +14,7 @@
 #include "LookupVendorImpl.hpp"
 #include "ResourceGuard.hpp"
 #include "RuntimeKeeper.hpp"
+#include "ScheduleService.hpp"
 #include "Support.hpp"
 
 #include <algorithm>
@@ -367,6 +368,7 @@ cl_int clEnqueueNDRangeKernel(cl_command_queue Queue,
                               cl_event* Event) try {
 
 	auto& RT = getRuntimeKeeper();
+	auto& Srv = getScheduleService();
 	auto& QT = RT.getQueueTable();
 	auto& KT = RT.getKernelTable();
 
@@ -537,7 +539,8 @@ cl_int clEnqueueNDRangeKernel(cl_command_queue Queue,
 		OCL_ASSERT(Ret);
 		}
 
-	cl_uint Threshold = RT.getCRThreshold();
+	// FIXME: uint64_t degrade to cl_uint
+	cl_uint Threshold = Srv.getCRThreshold();
 
 	Ret = venSetKernelArg(Kernel, Idx++, sizeof(cl_mem), &DeviceMetadata.get());
 	OCL_ASSERT(Ret);

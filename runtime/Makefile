@@ -4,7 +4,8 @@ CXXFLAGS = -Wall -Wextra -pedantic -fstack-protector-strong -g3 \
            -DCL_USE_DEPRECATED_OPENCL_1_2_APIS -Wno-ignored-attributes \
            # -O2 -ftree-vectorize -fno-plt -flto
 LDFLAGS  = -Wl,-O1,--sort-common,--as-needed,-z,relro,-z,now # -s
-LIBS     = -lyaml-cpp -lOpenCL -ldl -lboost_thread
+LIBS     = $(shell $(PKG_CONFIG) --libs libsystemd) \
+           -lyaml-cpp -lOpenCL -ldl -lboost_thread
 
 TARGET := libclpkm.so
 SRCS   := $(wildcard *.cpp)

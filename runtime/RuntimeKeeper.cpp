@@ -16,26 +16,17 @@ using namespace CLPKM;
 
 
 // Override config if specified from environment variable
-RuntimeKeeper::RuntimeKeeper() : Priority(LOW), LogLevel(FATAL) {
-
-	if (const char* Fine = getenv("CLPKM_PRIORITY")) {
-		if (!strcmp(Fine, "high"))
-			Priority = HIGH;
-		else if (strcmp(Fine, "low"))
-			this->Log("==CLPKM== Unrecognised priority: \"%s\"\n", Fine);
-		}
-
+RuntimeKeeper::RuntimeKeeper() : LogLevel(loglevel::FATAL) {
 	if (const char* Level = getenv("CLPKM_LOGLEVEL")) {
 		if (!strcmp(Level, "error"))
-			LogLevel = ERROR;
+			LogLevel = loglevel::ERROR;
 		else if (!strcmp(Level, "info"))
-			LogLevel = INFO;
+			LogLevel = loglevel::INFO;
 		else if (!strcmp(Level, "debug"))
-			LogLevel = DEBUG;
+			LogLevel = loglevel::DEBUG;
 		else if (strcmp(Level, "fatal"))
 			this->Log("==CLPKM== Unrecognised log level: \"%s\"\n", Level);
 		}
-
 	}
 
 
