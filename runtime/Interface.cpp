@@ -284,7 +284,7 @@ cl_int clBuildProgram(cl_program Program,
 		return Ret;
 		}
 
-	RT.Log("==CLPKM== Vendor compiler build log:\n"
+	RT.Log("\n==CLPKM== Vendor compiler build log:\n"
 	       "------------[ cut here ]------------\n"
 	       "%s\n"
 	       "------------[ cut here ]------------\n",

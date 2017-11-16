@@ -152,11 +152,27 @@ void ScheduleService::StartBus() {
 
 
 void ScheduleService::SchedStart() {
-	// TODO
+	if (Priority == priority::HIGH) {
+		// Notify the worker that the RunLevel is no longer 0
+		if (RunLevel++ == 0)
+			CV.notify_one();
+		return;
+		}
+	// Low priority task starts here
+	std::unique_lock<std::mutex> Lock(Mutex);
+	// Wait until RunLevel becomes 0
+	CV.wait(Lock, [&]() -> bool {
+		return !RunLevel;
+		});
 	}
 
 void ScheduleService::SchedEnd() {
-	// TODO
+	if (Priority == priority::LOW)
+		return;
+	// If we reached here, the RunLevel is changed to 0, i.e. no running tasks
+	// Notify the worker to inform the daemon
+	if (--RunLevel == 0)
+		CV.notify_one();
 	}
 
 
