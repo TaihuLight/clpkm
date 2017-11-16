@@ -101,8 +101,8 @@ int SetHighPrioProc(sd_bus_message* Msg, void* UserData,
 	auto& D = getDaemonKeeper();
 
 	// The flag indicates that the process want to set or clear run level
-	bool Flag = false;
-	int  Ret = sd_bus_message_read(Msg, "b", &Flag);
+	unsigned Flag = 0;
+	int Ret = sd_bus_message_read(Msg, "b", &Flag);
 
 	if (Ret < 0) {
 		D.Log(DaemonKeeper::loglevel::ERROR,

@@ -50,7 +50,9 @@ public:
 		};
 
 	const std::string& getCompilerPath() { return CompilerPath; }
+
 	uint64_t getCRThreshold() { return Threshold; }
+	priority getPriority() { return Priority; }
 
 	// Call this function when the process want to do some task
 	SchedGuard Schedule() { return SchedGuard(); }
@@ -84,8 +86,9 @@ private:
 	std::mutex              Mutex;
 	std::condition_variable CV;
 
-	// bus mode, prio
+	// Internal functions
 	ScheduleService();
+	~ScheduleService();
 
 	void StartBus();
 

@@ -16,11 +16,6 @@ using namespace CLPKM;
 
 namespace {
 
-// atexit handler to shut down IPC worker thread
-void ShutdownSchedSrv() {
-	getScheduleService().Terminate();
-	}
-
 // Watcher for low priority tasks
 int RunLevelChangeWatcher(sd_bus_message* Msg, void* UserData,
                           sd_bus_error* ErrorRet) {
@@ -28,7 +23,7 @@ int RunLevelChangeWatcher(sd_bus_message* Msg, void* UserData,
 	(void) ErrorRet;
 
 	auto& RunLevel = *reinterpret_cast<std::atomic<unsigned>*>(UserData);
-	bool  Level = false;
+	unsigned Level = 1;
 
 	int Ret = sd_bus_message_read(Msg, "b", &Level);
 	INTER_ASSERT(Ret >= 0,
@@ -54,9 +49,6 @@ ScheduleService::ScheduleService()
 : IsOnTerminate(false), IsOnSystemBus(false), Priority(priority::LOW),
   Bus(nullptr), Slot(nullptr), Threshold(0), RunLevel(0) {
 
-	int Ret = atexit(ShutdownSchedSrv);
-	INTER_ASSERT(Ret == 0, "failed to register at exit handler!");
-
 	if (const char* Fine = getenv("CLPKM_PRIORITY")) {
 		if (!strcmp(Fine, "high"))
 			Priority = priority::HIGH;
@@ -70,13 +62,26 @@ ScheduleService::ScheduleService()
 
 	}
 
+ScheduleService::~ScheduleService() {
+	this->Terminate();
+	}
+
 
 
 void ScheduleService::Terminate() {
+
 	IsOnTerminate = true;
+
 	if (Priority == priority::HIGH)
 		CV.notify_all();
-	IPCWorker.join();
+
+	if (IPCWorker.joinable())
+		IPCWorker.join();
+
+	// Clean up and reset to NULL
+	Slot = sd_bus_slot_unref(Slot);
+	Bus = sd_bus_flush_close_unref(Bus);
+
 	}
 
 
@@ -92,8 +97,10 @@ void ScheduleService::StartBus() {
 	INTER_ASSERT(Ret >= 0, "failed to open bus: %s", StrError(-Ret).c_str());
 
 	// Only low priority tasks need to get config
-	if (Priority != priority::LOW)
+	if (Priority != priority::LOW) {
 		IPCWorker = std::thread(&ScheduleService::HighPrioProcWorker, this);
+		return;
+		}
 
 	Ret = sd_bus_add_match(
 			Bus, &Slot,
@@ -104,8 +111,8 @@ void ScheduleService::StartBus() {
 			RunLevelChangeWatcher, &RunLevel);
 	INTER_ASSERT(Ret >= 0, "failed to add match: %s", StrError(-Ret).c_str());
 
-	sd_bus_message* Msg = nullptr;
 	sd_bus_error    BusError = SD_BUS_ERROR_NULL;
+	sd_bus_message* Msg = nullptr;
 
 	Ret = sd_bus_call_method(
 			Bus,
@@ -117,17 +124,28 @@ void ScheduleService::StartBus() {
 	INTER_ASSERT(Ret >= 0, "call method failed: %s", StrError(-Ret).c_str());
 
 	const char* Path = nullptr;
-	bool Level = true;
+	unsigned Level = 1;
 
+	// Note: BOOLEAN uses one int to store its value
+	//       Pass a C++ bool variable here can result in wild memory access
 	Ret = sd_bus_message_read(Msg, "stb", &Path, &Threshold, &Level);
 	INTER_ASSERT(Ret >= 0, "failed to read message: %s", StrError(-Ret).c_str());
 
+	getRuntimeKeeper().Log(
+		RuntimeKeeper::loglevel::INFO,
+		"==CLPKM== Got config from the service\n"
+		"==CLPKM==   cc: \"%s\"\n"
+		"==CLPKM==   threshold: %" PRIu64 "\n"
+		"==CLPKM==   level: %d\n",
+		Path, Threshold, Level);
+
 	CompilerPath = Path;
 	RunLevel = Level;
-	IPCWorker = std::thread(&ScheduleService::LowPrioProcWorker, this);
 
-	sd_bus_message_unref(Msg);
 	sd_bus_error_free(&BusError);
+	sd_bus_message_unref(Msg);
+
+	IPCWorker = std::thread(&ScheduleService::LowPrioProcWorker, this);
 
 	}
 
@@ -165,9 +183,10 @@ void ScheduleService::HighPrioProcWorker() {
 		if (IsOnTerminate)
 			return;
 
-		sd_bus_message* Msg = nullptr;
 		sd_bus_error    BusError = SD_BUS_ERROR_NULL;
+		sd_bus_message* Msg = nullptr;
 
+		// Note: bool is promoted to int here, no need to worry about the width
 		int Ret = sd_bus_call_method(
 				Bus,
 				"edu.nctu.sslab.CLPKMSchedSrv",  // service
@@ -177,7 +196,7 @@ void ScheduleService::HighPrioProcWorker() {
 				&BusError, &Msg, "b", (OldRunLevel = !OldRunLevel));
 		INTER_ASSERT(Ret >= 0, "call method failed: %s", StrError(-Ret).c_str());
 
-		bool IsGranted = false;
+		unsigned IsGranted = 0;
 
 		Ret = sd_bus_message_read(Msg, "b", &IsGranted);
 		INTER_ASSERT(Ret >= 0,
@@ -186,8 +205,8 @@ void ScheduleService::HighPrioProcWorker() {
 
 		INTER_ASSERT(IsGranted, "the schedule service denied priority change!");
 
-		sd_bus_message_unref(Msg);
 		sd_bus_error_free(&BusError);
+		sd_bus_message_unref(Msg);
 
 		}
 
@@ -204,9 +223,13 @@ void ScheduleService::LowPrioProcWorker() {
 		int Ret = sd_bus_get_timeout(Bus, &Timeout);
 		INTER_ASSERT(Ret >= 0, "failed to get bus timeout", StrError(-Ret).c_str());
 
+		// 0.1s shall be enough
+		if (!Timeout)
+			Timeout = 100000;
+
 		getRuntimeKeeper().Log(
 				RuntimeKeeper::loglevel::INFO,
-				"==CLPKM== Timeout is %" PRIu64 " us\n",
+				"==CLPKM== Timeout of sd_bus_wait is set to %" PRIu64 " us\n",
 				Timeout);
 
 		}

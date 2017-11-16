@@ -160,6 +160,12 @@ cl_int clBuildProgram(cl_program Program,
                       void (*Notify)(cl_program, void* ),
                       void* UserData) try {
 
+	// No need to instrument the kernel of high priority tasks
+	if (getScheduleService().getPriority() != ScheduleService::priority::LOW) {
+		return Lookup<OclAPI::clBuildProgram>()(
+				Program, NumOfDevice, DeviceList, Options, Notify, UserData);
+		}
+
 	// FIXME: we can't handle clBuildProgram on the same program twice atm
 	std::string Source;
 	size_t SourceLength = 0;
