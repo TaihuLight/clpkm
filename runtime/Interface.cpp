@@ -32,15 +32,32 @@ using namespace CLPKM;
 
 extern "C" {
 
+cl_context clCreateContext(const cl_context_properties* Properties,
+                           cl_uint NumOfDevices,
+                           const cl_device_id* Devices,
+                           void (CL_CALLBACK *Notify)(const char* ,
+                                                      const void* , size_t ,
+                                                      void* ),
+                           void* UserData,
+                           cl_int* ErrorRet) {
+	auto S = getScheduleService().Schedule();
+	return Lookup<OclAPI::clCreateContext>()(Properties, NumOfDevices, Devices,
+	                                         Notify, UserData, ErrorRet);
+}
+
 cl_command_queue clCreateCommandQueue(cl_context Context, cl_device_id Device,
                                       cl_command_queue_properties Properties,
                                       cl_int* ErrorRet) try {
 
+	auto venCreateCommandQueue = Lookup<OclAPI::clCreateCommandQueue>();
+
+	if (getScheduleService().getPriority() != ScheduleService::priority::LOW)
+		return venCreateCommandQueue(Context, Device, Properties, ErrorRet);
+
 	auto Ret = CL_SUCCESS;
 
 	// Create original queue
-	auto RawQueue = Lookup<OclAPI::clCreateCommandQueue>()(
-			Context, Device, Properties, &Ret);
+	auto RawQueue = venCreateCommandQueue(Context, Device, Properties, &Ret);
 	OCL_ASSERT(Ret);
 
 	clQueue QueueWrap(RawQueue);
@@ -49,8 +66,7 @@ cl_command_queue clCreateCommandQueue(cl_context Context, cl_device_id Device,
 	constexpr auto Property = CL_QUEUE_OUT_OF_ORDER_EXEC_MODE_ENABLE |
 	                          CL_QUEUE_PROFILING_ENABLE;
 
-	clQueue ShadowQueue = Lookup<OclAPI::clCreateCommandQueue>()(
-			Context, Device, Property, &Ret);
+	clQueue ShadowQueue = venCreateCommandQueue(Context, Device, Property, &Ret);
 	OCL_ASSERT(Ret);
 
 	auto& RT = getRuntimeKeeper();
@@ -88,6 +104,11 @@ catch (const std::bad_alloc& ) {
 
 cl_int clReleaseCommandQueue(cl_command_queue Queue) try {
 
+	auto venReleaseCommandQueue = Lookup<OclAPI::clReleaseCommandQueue>();
+
+	if (getScheduleService().getPriority() != ScheduleService::priority::LOW)
+		return venReleaseCommandQueue(Queue);
+
 	auto& RT = getRuntimeKeeper();
 	auto& QT = RT.getQueueTable();
 
@@ -96,8 +117,6 @@ cl_int clReleaseCommandQueue(cl_command_queue Queue) try {
 
 	if (It == QT.end())
 		return CL_INVALID_COMMAND_QUEUE;
-
-	auto venReleaseQueue = Lookup<OclAPI::clReleaseCommandQueue>();
 
 	// Put mutex here to prevent multi-threads got old reference count and
 	// nobody releases the shadow queue
@@ -115,7 +134,7 @@ cl_int clReleaseCommandQueue(cl_command_queue Queue) try {
 		QT.erase(It);
 		}
 
-	return venReleaseQueue(Queue);
+	return venReleaseCommandQueue(Queue);
 
 	}
 catch (const __ocl_error& OclError) {
@@ -126,6 +145,13 @@ cl_int clGetProgramBuildInfo(cl_program Program, cl_device_id Device,
                              cl_program_build_info ParamName,
                              size_t ParamValSize, void* ParamVal,
                              size_t* ParamValSizeRet) {
+
+	auto venGetProgramBuildInfo = Lookup<OclAPI::clGetProgramBuildInfo>();
+
+	if (getScheduleService().getPriority() != ScheduleService::priority::LOW) {
+		return venGetProgramBuildInfo(
+				Program, Device, ParamName, ParamValSize, ParamVal, ParamValSizeRet);
+		}
 
 	auto& RT = getRuntimeKeeper();
 	auto& PT = RT.getProgramTable();
@@ -148,7 +174,7 @@ cl_int clGetProgramBuildInfo(cl_program Program, cl_device_id Device,
 			}
 		}
 
-	return Lookup<OclAPI::clGetProgramBuildInfo>()(
+	return venGetProgramBuildInfo(
 			Program, Device, ParamName, ParamValSize, ParamVal, ParamValSizeRet);
 
 	}
@@ -157,12 +183,14 @@ cl_int clGetProgramBuildInfo(cl_program Program, cl_device_id Device,
 cl_int clBuildProgram(cl_program Program,
                       cl_uint NumOfDevice, const cl_device_id* DeviceList,
                       const char* Options,
-                      void (*Notify)(cl_program, void* ),
+                      void (CL_CALLBACK *Notify)(cl_program, void* ),
                       void* UserData) try {
+
+	auto venBuildProgram = Lookup<OclAPI::clBuildProgram>();
 
 	// No need to instrument the kernel of high priority tasks
 	if (getScheduleService().getPriority() != ScheduleService::priority::LOW) {
-		return Lookup<OclAPI::clBuildProgram>()(
+		return venBuildProgram(
 				Program, NumOfDevice, DeviceList, Options, Notify, UserData);
 		}
 
@@ -246,8 +274,8 @@ cl_int clBuildProgram(cl_program Program,
 	INTER_ASSERT(It.second, "insertion to program table didn't take place");
 
 	// Call the vendor's impl to build the instrumented code
-	Ret = Lookup<OclAPI::clBuildProgram>()(
-			RawShadowProgram, NumOfDevice, DeviceList, Options, Notify, UserData);
+	Ret = venBuildProgram(RawShadowProgram, NumOfDevice, DeviceList, Options,
+	                      Notify, UserData);
 
 	// Return immediately if not in debug mode
 	if (!RT.shouldLog(RuntimeKeeper::loglevel::DEBUG))
@@ -259,10 +287,12 @@ cl_int clBuildProgram(cl_program Program,
 		return Ret;
 		}
 
+	auto venGetProgramBuildInfo = Lookup<OclAPI::clGetProgramBuildInfo>();
+
 	size_t LogLength = 0;
 	std::string VendorLog;
 
-	cl_int DRet = Lookup<OclAPI::clGetProgramBuildInfo>()(
+	cl_int DRet = venGetProgramBuildInfo(
 			RawShadowProgram, DeviceList[0], CL_PROGRAM_BUILD_LOG,
 			0, nullptr, &LogLength);
 
@@ -274,7 +304,7 @@ cl_int clBuildProgram(cl_program Program,
 
 	VendorLog.resize(LogLength, '\0');
 
-	DRet = Lookup<OclAPI::clGetProgramBuildInfo>()(
+	DRet = venGetProgramBuildInfo(
 			RawShadowProgram, DeviceList[0], CL_PROGRAM_BUILD_LOG,
 			LogLength, VendorLog.data(), nullptr);
 
@@ -301,6 +331,11 @@ catch (const std::bad_alloc& ) {
 	}
 
 cl_kernel clCreateKernel(cl_program Program, const char* Name, cl_int* Ret) try {
+
+	auto venCreateKernel = Lookup<OclAPI::clCreateKernel>();
+
+	if (getScheduleService().getPriority() != ScheduleService::priority::LOW)
+		return venCreateKernel(Program, Name, Ret);
 
 	auto& RT = getRuntimeKeeper();
 	auto& PT = RT.getProgramTable();
@@ -336,8 +371,7 @@ cl_kernel clCreateKernel(cl_program Program, const char* Name, cl_int* Ret) try 
 	cl_program ShadowProg = ProgInfo.ShadowProgram.get();
 
 	// Try to create the first kernel so we can report error early
-	cl_kernel RawKernel = Lookup<OclAPI::clCreateKernel>()(ShadowProg, Name,
-	                                                       Ret);
+	cl_kernel RawKernel = venCreateKernel(ShadowProg, Name, Ret);
 
 	// Creation failed
 	if (RawKernel == NULL)
@@ -373,8 +407,15 @@ cl_int clEnqueueNDRangeKernel(cl_command_queue Queue,
                               const cl_event* WaitingList,
                               cl_event* Event) try {
 
-	auto& RT = getRuntimeKeeper();
 	auto& Srv = getScheduleService();
+
+	if (Srv.getPriority() != ScheduleService::priority::LOW) {
+		// TODO: set event callback
+		return Lookup<OclAPI::clEnqueueNDRangeKernel>()(
+				Queue, K, WorkDim, GWO, GWS, LWS, NumOfWaiting, WaitingList, Event);
+		}
+
+	auto& RT = getRuntimeKeeper();
 	auto& QT = RT.getQueueTable();
 	auto& KT = RT.getKernelTable();
 
@@ -613,6 +654,9 @@ catch (const std::bad_alloc& ) {
 
 cl_int clRetainKernel(cl_kernel K) {
 
+	if (getScheduleService().getPriority() != ScheduleService::priority::LOW)
+		return Lookup<OclAPI::clRetainKernel>()(K);
+
 	auto& RT = getRuntimeKeeper();
 	auto& KT = RT.getKernelTable();
 
@@ -633,6 +677,11 @@ cl_int clRetainKernel(cl_kernel K) {
 	}
 
 cl_int clReleaseKernel(cl_kernel K) {
+
+	auto venReleaseKernel = Lookup<OclAPI::clReleaseKernel>();
+
+	if (getScheduleService().getPriority() != ScheduleService::priority::LOW)
+		return venReleaseKernel(K);
 
 	auto& RT = getRuntimeKeeper();
 	auto& KT = RT.getKernelTable();
@@ -660,13 +709,16 @@ cl_int clReleaseKernel(cl_kernel K) {
 
 	KT.erase(It);
 
-	return Lookup<OclAPI::clReleaseKernel>()(K);
+	return venReleaseKernel(K);
 
 	}
 
 cl_int clReleaseProgram(cl_program Program) try {
 
 	auto venReleaseProgram = Lookup<OclAPI::clReleaseProgram>();
+
+	if (getScheduleService().getPriority() != ScheduleService::priority::LOW)
+		return venReleaseProgram(Program);
 
 	auto& RT = getRuntimeKeeper();
 	auto& PT = RT.getProgramTable();
@@ -702,6 +754,11 @@ catch (const __ocl_error& OclError) {
 
 cl_int clSetKernelArg(cl_kernel K, cl_uint ArgIndex, size_t ArgSize,
                       const void* ArgValue) {
+
+	auto venSetKernelArg = Lookup<OclAPI::clSetKernelArg>();
+
+	if (getScheduleService().getPriority() != ScheduleService::priority::LOW)
+		return venSetKernelArg(K, ArgIndex, ArgSize, ArgValue);
 
 	auto& RT = getRuntimeKeeper();
 	auto& KT = RT.getKernelTable();
@@ -741,7 +798,7 @@ cl_int clSetKernelArg(cl_kernel K, cl_uint ArgIndex, size_t ArgSize,
 		return CL_INVALID_ARG_VALUE;
 
 	// The key is never used, only for sanity check
-	cl_int Ret = Lookup<OclAPI::clSetKernelArg>()(K, ArgIndex, ArgSize, ArgValue);
+	cl_int Ret = venSetKernelArg(K, ArgIndex, ArgSize, ArgValue);
 
 	// Only record on success
 	if (Ret == CL_SUCCESS) {
@@ -763,10 +820,19 @@ cl_int clEnqueueReadBuffer(cl_command_queue Queue,
                            const cl_event* WaitingList,
                            cl_event* Event) try {
 
+	auto venEnqueueReadBuffer = Lookup<OclAPI::clEnqueueReadBuffer>();
+
+	if (getScheduleService().getPriority() != ScheduleService::priority::LOW) {
+		// TODO
+		return venEnqueueReadBuffer(
+				Queue, Buffer, Blocking, Offset, Size, HostPtr, NumOfWaiting,
+				WaitingList, Event);
+		}
+
 	// Invoke with new waiting list and pointer to return the event object
-	auto ReadBuffer = [&](const cl_event* NewWaitingList, size_t NewNumOfWaiting,
+	auto ReadBuffer = [=](const cl_event* NewWaitingList, size_t NewNumOfWaiting,
 	                      cl_event* AltEvent) -> cl_int {
-		return Lookup<OclAPI::clEnqueueReadBuffer>()(
+		return venEnqueueReadBuffer(
 				Queue, Buffer, Blocking, Offset, Size, HostPtr, NewNumOfWaiting,
 				NewWaitingList, AltEvent);
 		};
@@ -791,9 +857,19 @@ cl_int clEnqueueWriteBuffer(cl_command_queue Queue,
                             const cl_event* WaitingList,
                             cl_event* Event) try {
 
-	auto WriteBuffer = [&](const cl_event* NewWaitingList, size_t NewNumOfWaiting,
+	auto venEnqueueWriteBuffer = Lookup<OclAPI::clEnqueueWriteBuffer>();
+
+	if (getScheduleService().getPriority() != ScheduleService::priority::LOW) {
+		// TODO
+		return venEnqueueWriteBuffer(
+				Queue, Buffer, Blocking, Offset, Size, HostPtr, NumOfWaiting,
+				WaitingList, Event);
+		}
+
+
+	auto WriteBuffer = [=](const cl_event* NewWaitingList, size_t NewNumOfWaiting,
 	                       cl_event* AltEvent) -> cl_int {
-		return Lookup<OclAPI::clEnqueueWriteBuffer>()(
+		return venEnqueueWriteBuffer(
 				Queue, Buffer, Blocking, Offset, Size, HostPtr, NewNumOfWaiting,
 				NewWaitingList, AltEvent);
 		};
@@ -810,10 +886,14 @@ catch (const std::bad_alloc& ) {
 
 cl_int clEnqueueMarker(cl_command_queue Queue, cl_event* Event) try {
 
-	auto EnqueueMarker = [&](const cl_event* WaitingList, size_t NumOfWaiting,
+	auto venEnqueueMarker = Lookup<OclAPI::clEnqueueMarkerWithWaitList>();
+
+	if (getScheduleService().getPriority() != ScheduleService::priority::LOW)
+		return venEnqueueMarker(Queue, 0, nullptr, Event);
+
+	auto EnqueueMarker = [=](const cl_event* WaitingList, size_t NumOfWaiting,
 	                         cl_event* AltEvent) -> cl_int {
-		return Lookup<OclAPI::clEnqueueMarkerWithWaitList>()(
-				Queue, NumOfWaiting, WaitingList, AltEvent);
+		return venEnqueueMarker(Queue, NumOfWaiting, WaitingList, AltEvent);
 		};
 
 	return Reorder(Queue, nullptr, 0, Event, EnqueueMarker);
@@ -837,12 +917,21 @@ void* clEnqueueMapBuffer(cl_command_queue Queue,
                          cl_event* Event,
                          cl_int* ErrorCode) try {
 
+	auto venEnqueueMapBuffer = Lookup<OclAPI::clEnqueueMapBuffer>();
+
+	if (getScheduleService().getPriority() != ScheduleService::priority::LOW) {
+		// TODO
+		return venEnqueueMapBuffer(
+				Queue, Buffer, Blocking, MapFlags, Offset, Size, NumOfWaiting,
+				WaitingList, Event, ErrorCode);
+		}
+
 	void* MapPtr = nullptr;
 
 	auto MapBuffer = [&](const cl_event* NewWaitingList, size_t NewNumOfWaiting,
 	                     cl_event* AltEvent) -> cl_int {
 		cl_int Ret = CL_SUCCESS;
-		MapPtr = Lookup<OclAPI::clEnqueueMapBuffer>()(
+		MapPtr = venEnqueueMapBuffer(
 				Queue, Buffer, Blocking, MapFlags, Offset, Size, NewNumOfWaiting,
 				NewWaitingList, AltEvent, &Ret);
 		return Ret;
@@ -868,9 +957,17 @@ cl_int clEnqueueUnmapMemObject(cl_command_queue Queue,
                                const cl_event* WaitingList,
                                cl_event* Event) try {
 
-	auto UnmapMemObj = [&](const cl_event* NewWaitingList, size_t NewNumOfWaiting,
+	auto venEnqueueUnmap = Lookup<OclAPI::clEnqueueUnmapMemObject>();
+
+	if (getScheduleService().getPriority() != ScheduleService::priority::LOW) {
+		// TODO
+		return venEnqueueUnmap(Queue, MemObj, MappedPtr, NumOfWaiting,
+		                       WaitingList, Event);
+		}
+
+	auto UnmapMemObj = [=](const cl_event* NewWaitingList, size_t NewNumOfWaiting,
 	                       cl_event* AltEvent) -> cl_int {
-		return Lookup<OclAPI::clEnqueueUnmapMemObject>()(
+		return venEnqueueUnmap(
 				Queue, MemObj, MappedPtr, NewNumOfWaiting, NewWaitingList, AltEvent);
 		};
 
@@ -896,9 +993,18 @@ cl_int clEnqueueReadImage(cl_command_queue Queue,
                           const cl_event* WaitingList,
                           cl_event* Event) try {
 
-	auto ReadImage = [&](const cl_event* NewWaitingList, size_t NewNumOfWaiting,
+	auto venEnqueueReadImage = Lookup<OclAPI::clEnqueueReadImage>();
+
+	if (getScheduleService().getPriority() != ScheduleService::priority::LOW) {
+		// TODO
+		return venEnqueueReadImage(
+				Queue, Image, Blocking, Origin, Region, RowPitch, SlicePitch, Ptr,
+				NumOfWaiting, WaitingList, Event);
+		}
+
+	auto ReadImage = [=](const cl_event* NewWaitingList, size_t NewNumOfWaiting,
 	                     cl_event* AltEvent) -> cl_int {
-		return Lookup<OclAPI::clEnqueueReadImage>()(
+		return venEnqueueReadImage(
 				Queue, Image, Blocking, Origin, Region, RowPitch, SlicePitch, Ptr,
 				NewNumOfWaiting, NewWaitingList, AltEvent);
 		};
@@ -918,19 +1024,27 @@ cl_int clEnqueueWriteImage(cl_command_queue Queue,
                            cl_bool Blocking,
                            const size_t Origin[3],
                            const size_t Region[3],
-                           size_t InputRowPitch,
-                           size_t InputSlicePitch,
+                           size_t RowPitch,
+                           size_t SlicePitch,
                            const void* Ptr,
                            cl_uint NumOfWaiting,
                            const cl_event* WaitingList,
                            cl_event* Event) try {
 
-	auto WriteImage = [&](const cl_event* NewWaitingList, size_t NewNumOfWaiting,
+	auto venEnqueueWriteImage = Lookup<OclAPI::clEnqueueWriteImage>();
+
+	if (getScheduleService().getPriority() != ScheduleService::priority::LOW) {
+		// TODO
+		return venEnqueueWriteImage(
+				Queue, Image, Blocking, Origin, Region, RowPitch, SlicePitch, Ptr,
+				NumOfWaiting, WaitingList, Event);
+		}
+
+	auto WriteImage = [=](const cl_event* NewWaitingList, size_t NewNumOfWaiting,
 	                      cl_event* AltEvent) -> cl_int {
-		return Lookup<OclAPI::clEnqueueWriteImage>()(
-				Queue, Image, Blocking, Origin, Region, InputRowPitch,
-				InputSlicePitch, Ptr, NewNumOfWaiting,
-				NewWaitingList, AltEvent);
+		return venEnqueueWriteImage(
+				Queue, Image, Blocking, Origin, Region, RowPitch, SlicePitch, Ptr,
+				NewNumOfWaiting, NewWaitingList, AltEvent);
 		};
 
 	return Reorder(Queue, WaitingList, NumOfWaiting, Event, WriteImage);
@@ -953,9 +1067,18 @@ cl_int clEnqueueCopyBuffer(cl_command_queue Queue,
                            const cl_event* WaitingList,
                            cl_event* Event) try {
 
-	auto CopyBuffer = [&](const cl_event* NewWaitingList, size_t NewNumOfWaiting,
+	auto venEnqueueCopyBuffer = Lookup<OclAPI::clEnqueueCopyBuffer>();
+
+	if (getScheduleService().getPriority() != ScheduleService::priority::LOW) {
+		// TODO
+		return venEnqueueCopyBuffer(
+				Queue, SrcBuffer, DstBuffer, SrcOffset, DstOffset, Size,
+				NumOfWaiting, WaitingList, Event);
+		}
+
+	auto CopyBuffer = [=](const cl_event* NewWaitingList, size_t NewNumOfWaiting,
 	                      cl_event* AltEvent) -> cl_int {
-		return Lookup<OclAPI::clEnqueueCopyBuffer>()(
+		return venEnqueueCopyBuffer(
 				Queue, SrcBuffer, DstBuffer, SrcOffset, DstOffset, Size,
 				NewNumOfWaiting, NewWaitingList, AltEvent);
 		};
@@ -980,9 +1103,18 @@ cl_int clEnqueueCopyBufferToImage(cl_command_queue Queue,
                                   const cl_event* WaitingList,
                                   cl_event* Event) try {
 
-	auto Copy2Image = [&](const cl_event* NewWaitingList, size_t NewNumOfWaiting,
+	auto venEnqueueCopy2Image = Lookup<OclAPI::clEnqueueCopyBufferToImage>();
+
+	if (getScheduleService().getPriority() != ScheduleService::priority::LOW) {
+		// TODO
+		return venEnqueueCopy2Image(
+				Queue, SrcBuffer, DstImage, SrcOffset, DstOrigin, Region,
+				NumOfWaiting, WaitingList, Event);
+		}
+
+	auto Copy2Image = [=](const cl_event* NewWaitingList, size_t NewNumOfWaiting,
 	                      cl_event* AltEvent) -> cl_int {
-		return Lookup<OclAPI::clEnqueueCopyBufferToImage>()(
+		return venEnqueueCopy2Image(
 				Queue, SrcBuffer, DstImage, SrcOffset, DstOrigin, Region,
 				NewNumOfWaiting, NewWaitingList, AltEvent);
 		};

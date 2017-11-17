@@ -133,7 +133,7 @@ void ScheduleService::StartBus() {
 
 	getRuntimeKeeper().Log(
 		RuntimeKeeper::loglevel::INFO,
-		"==CLPKM== Got config from the service\n"
+		"==CLPKM== Got config from the service:\n"
 		"==CLPKM==   cc: \"%s\"\n"
 		"==CLPKM==   threshold: %" PRIu64 "\n"
 		"==CLPKM==   level: %d\n",
