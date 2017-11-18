@@ -15,7 +15,7 @@ int DaemonKeeper::Daemonize() noexcept {
 	if (daemon(0, 0) != 0)
 		return errno;
 	openlog("clpkm-sched-srv", LOG_PID, LOG_DAEMON);
-	RunMode = DAEMON;
+	RunMode = run_mode::DAEMON;
 	return 0;
 	}
 

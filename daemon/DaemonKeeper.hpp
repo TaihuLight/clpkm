@@ -22,7 +22,7 @@ namespace CLPKM {
 // Main class
 class DaemonKeeper {
 public:
-	enum loglevel : int {
+	enum class loglevel : int {
 		FATAL = LOG_CRIT,
 		ERROR = LOG_ERR,
 		INFO  = LOG_INFO,
@@ -30,7 +30,7 @@ public:
 		NUM_OF_LOGLEVEL
 		};
 
-	enum run_mode {
+	enum class run_mode {
 		DAEMON,
 		TERMINAL
 	};
@@ -41,7 +41,7 @@ public:
 
 	template <class ... T>
 	void Log(T&& ... FormatStr) {
-		if (RunMode == DAEMON)
+		if (RunMode == run_mode::DAEMON)
 			syslog(LOG_INFO, FormatStr...);
 		else
 			fprintf(stderr, FormatStr...);
@@ -51,8 +51,8 @@ public:
 	void Log(loglevel Level, T&& ... FormatStr) {
 		if (!shouldLog(Level))
 			return;
-		if (RunMode == DAEMON)
-			syslog(Level, FormatStr...);
+		if (RunMode == run_mode::DAEMON)
+			syslog(static_cast<int>(Level), FormatStr...);
 		else
 			fprintf(stderr, FormatStr...);
 		}
@@ -63,7 +63,7 @@ private:
 	DaemonKeeper(const DaemonKeeper& ) = delete;
 	DaemonKeeper& operator=(const DaemonKeeper& ) = delete;
 
-	DaemonKeeper() : LogLevel(DEBUG), RunMode(TERMINAL) { }
+	DaemonKeeper() : LogLevel(loglevel::DEBUG), RunMode(run_mode::TERMINAL) { }
 
 	//
 	loglevel LogLevel;

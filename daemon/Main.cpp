@@ -7,12 +7,13 @@
 
 #include "DaemonKeeper.hpp"
 #include "ResourceGuard.hpp"
+#include "TaskKind.hpp"
 
 #include <cerrno>
 #include <cstdint>
 #include <cstdlib>
 #include <string>
-#include <unordered_set>
+#include <unordered_map>
 
 #include <signal.h>
 
@@ -61,8 +62,20 @@ catch (const std::exception& E) {
 
 // Helper struct for task manager because I'm lazy again
 struct {
-	bool IsOnTerminate;
-	std::unordered_set<std::string> HighPrioSet;
+	bool IsOnTerminate = false;
+
+	// Record what kinda task the individual high priority process is running
+	std::unordered_map<std::string, task_bitmap> ProcBitmap;
+
+	// Global bitmap indicates if there is any high priority process running task
+	// of corresponding kind
+	task_bitmap GlobalBitmap = 0;
+
+	// Count of each kind of task that high pirority processes are running
+	// Help us incrementally update the bitmap
+	unsigned CountOfEachTaskKind[
+			static_cast<size_t>(task_kind::NUM_OF_TASK_KIND)] = {};
+
 	} Task;
 
 void OnTerminate(int Signal) {
@@ -87,22 +100,57 @@ int GetConfig(sd_bus_message *Msg, void *UserData, sd_bus_error *ErrorRet) {
 		}
 
 	return sd_bus_reply_method_return(
-			Msg, "stb", GblConfig.CompilerPath.c_str(), GblConfig.Threshold,
-			Task.HighPrioSet.size() > 0);
+			Msg, "st" TASK_BITMAP_DBUS_TYPE_CODE,
+			GblConfig.CompilerPath.c_str(), GblConfig.Threshold,
+			Task.GlobalBitmap);
+
+	}
+
+// Update the bitmap of a given process, and propogate it throught global bitmap
+void UpdateProcBitmap(task_bitmap& ProcMap, task_bitmap NewMap) {
+
+	// Retrieve old bitmap so we know what has changed
+	task_bitmap OldMap = ProcMap;
+	ProcMap = NewMap;
+
+	task_bitmap NewGblMap = Task.GlobalBitmap;
+	size_t NumOfTaskKind = static_cast<size_t>(task_kind::NUM_OF_TASK_KIND);
+
+	// Increamentally update the global bitmap
+	for (size_t Kind = 0; Kind < NumOfTaskKind; ++Kind) {
+
+		unsigned ThisCount = Task.CountOfEachTaskKind[Kind];
+
+		// Update the count of process running this kind of task
+		ThisCount += static_cast<unsigned>(NewMap & 1)
+		             - static_cast<unsigned>(OldMap & 1);
+
+		// Update the corresponding bit of this kind in the global bitmap
+		NewGblMap ^= (-static_cast<task_bitmap>(IsNotZero(ThisCount)) ^ NewGblMap)
+		             & (static_cast<task_bitmap>(1) << Kind);
+
+		// Prep for the next kind
+		OldMap >>= 1;
+		NewMap >>= 1;
+		Task.CountOfEachTaskKind[Kind] = ThisCount;
+
+		}
+
+	Task.GlobalBitmap = NewGblMap;
 
 	}
 
 // For high priority processes
-int SetHighPrioProc(sd_bus_message* Msg, void* UserData,
-                    sd_bus_error* ErrorRet) {
+int SetHighPrioTaskBitmap(sd_bus_message* Msg, void* UserData,
+                          sd_bus_error* ErrorRet) {
 
 	(void) UserData;
 	(void) ErrorRet;
 	auto& D = getDaemonKeeper();
 
 	// The flag indicates that the process want to set or clear run level
-	unsigned Flag = 0;
-	int Ret = sd_bus_message_read(Msg, "b", &Flag);
+	task_bitmap Bitmap = 0;
+	int Ret = sd_bus_message_read(Msg, TASK_BITMAP_DBUS_TYPE_CODE, &Bitmap);
 
 	if (Ret < 0) {
 		D.Log(DaemonKeeper::loglevel::ERROR,
@@ -112,19 +160,19 @@ int SetHighPrioProc(sd_bus_message* Msg, void* UserData,
 
 	std::string Sender = sd_bus_message_get_sender(Msg);
 
-	// Check if the process is in the high priority process set
-	auto It = Task.HighPrioSet.find(Sender);
+	// Mask of valid fields
+	task_bitmap Mask = 1;
+	Mask = (Mask << static_cast<size_t>(task_kind::NUM_OF_TASK_KIND)) - 1;
+
 	bool Reply = true;
 
-	// If the process want to register, and it is not already in the set
-	if (Flag && It == Task.HighPrioSet.end())
-		Task.HighPrioSet.emplace(std::move(Sender));
-	// If the process want to unregister
-	else if (!Flag && It != Task.HighPrioSet.end())
-		Task.HighPrioSet.erase(It);
-	// If the request doesn't make sense, reply false
-	else
+	// Check if the bitmap is valid, i.e. no 1's outside of the mask
+	if (Bitmap & ~Mask)
 		Reply = false;
+	// Update the bitmap of the sender process
+	// If the value doesn't exist, it's zero-initialized
+	else
+		UpdateProcBitmap(Task.ProcBitmap[Sender], Bitmap);
 
 	// sd_bus_error_set_const
 	return sd_bus_reply_method_return(Msg, "b", Reply);
@@ -133,11 +181,11 @@ int SetHighPrioProc(sd_bus_message* Msg, void* UserData,
 
 const sd_bus_vtable SchedSrvVTable[] = {
 	SD_BUS_VTABLE_START(0),
-	SD_BUS_METHOD("GetConfig", "", "stb", GetConfig,
+	SD_BUS_METHOD("GetConfig", "", "st" TASK_BITMAP_DBUS_TYPE_CODE, GetConfig,
 	              SD_BUS_VTABLE_UNPRIVILEGED),
-	SD_BUS_METHOD("SetHighPrioProc", "b", "b", SetHighPrioProc,
+	SD_BUS_METHOD("SetHighPrioTaskBitmap", TASK_BITMAP_DBUS_TYPE_CODE, "b",
 	              // FIXME: should not be unprivileged!
-	              SD_BUS_VTABLE_UNPRIVILEGED),
+	              SetHighPrioTaskBitmap, SD_BUS_VTABLE_UNPRIVILEGED),
 	SD_BUS_SIGNAL("RunLevelChanged", "b", 0),
 	SD_BUS_VTABLE_END
 	};
@@ -166,10 +214,16 @@ int NameOwnerChangeWatcher(sd_bus_message* Msg, void* UserData,
 	      "Name \"%s\" owner changed: \"%s\" -> \"%s\"\n",
 	      Name, OldOwner, NewOwner);
 
-	// If the released name was owned by a high priority process, remove it from
-	// the set
-	if (NewOwner[0] == '\0')
-		Task.HighPrioSet.erase(Name);
+	// If the name has no owner now, i.e. released
+	if (NewOwner[0] == '\0') {
+		// If the name was owned by a high priority process
+		if (auto It = Task.ProcBitmap.find(Name); It != Task.ProcBitmap.end()) {
+			// Update its bitmap to all zero, i.e. no running task
+			UpdateProcBitmap(It->second, 0);
+			// ...and release the bitmap
+			Task.ProcBitmap.erase(It);
+			}
+		}
 
 	return 1;
 
@@ -205,8 +259,6 @@ int main(int ArgCount, const char* ArgVar[]) {
 		      E.what());
 		return -1;
 		}
-
-	Task.IsOnTerminate = false;
 
 	// Set up signal handlers
 	if (signal(SIGINT, SIG_IGN) == SIG_ERR
@@ -290,7 +342,7 @@ int main(int ArgCount, const char* ArgVar[]) {
 		return -1;
 		}
 
-	bool HighPrioRunning = false;
+	task_bitmap Bitmap = 0;
 
 	// Main loop
 	while (!Task.IsOnTerminate) {
@@ -307,22 +359,22 @@ int main(int ArgCount, const char* ArgVar[]) {
 		if (Ret > 0)
 			continue;
 
-		bool HighPrioStillRunning = Task.HighPrioSet.size();
+		task_bitmap NewBitmap = Task.GlobalBitmap;
 
 		// No more request atm
 		// Check if run level changed
-		if (HighPrioRunning != HighPrioStillRunning) {
+		if (Bitmap != NewBitmap) {
 
 			D.Log(DaemonKeeper::loglevel::INFO,
-			      "run level change to %d\n",
-			      HighPrioRunning = HighPrioStillRunning);
+			      "run level change to %" TASK_BITMAP_PRINTF_SPECIFIER "\n",
+			      Bitmap = NewBitmap);
 
 			Ret = sd_bus_emit_signal(
 					Bus.get(),
 					"/edu/nctu/sslab/CLPKMSchedSrv",
 					"edu.nctu.sslab.CLPKMSchedSrv",
-					"RunLevelChanged", "b",
-					HighPrioRunning);
+					"RunLevelChanged", TASK_BITMAP_DBUS_TYPE_CODE,
+					Bitmap);
 
 			if (Ret < 0) {
 				D.Log(DaemonKeeper::loglevel::FATAL,
