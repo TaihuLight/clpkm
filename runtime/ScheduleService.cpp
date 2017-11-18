@@ -151,7 +151,7 @@ void ScheduleService::StartBus() {
 
 
 
-void ScheduleService::SchedStart() {
+void ScheduleService::SchedStart(task_kind Kind) {
 	if (Priority == priority::HIGH) {
 		// Notify the worker that the RunLevel is no longer 0
 		if (RunLevel++ == 0)
@@ -166,7 +166,7 @@ void ScheduleService::SchedStart() {
 		});
 	}
 
-void ScheduleService::SchedEnd() {
+void ScheduleService::SchedEnd(task_kind Kind) {
 	if (Priority == priority::LOW)
 		return;
 	// If we reached here, the RunLevel is changed to 0, i.e. no running tasks

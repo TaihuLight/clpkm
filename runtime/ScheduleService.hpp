@@ -8,6 +8,7 @@
 #ifndef __CLPKM__SCHEDULE_SERVICE_HPP__
 #define __CLPKM__SCHEDULE_SERVICE_HPP__
 
+#include "TaskKind.hpp"
 #include <atomic>
 #include <condition_variable>
 #include <mutex>
@@ -31,20 +32,22 @@ public:
 	class SchedGuard {
 	public:
 		SchedGuard(SchedGuard&& G)
-		: GottaRelease(G.GottaRelease) { G.GottaRelease = false; }
+		: Kind(G.Kind) { G.Kind = task_kind::NUM_OF_TASK_KIND; }
 
 		~SchedGuard() {
-			if (GottaRelease)
-				getScheduleService().SchedEnd();
+			if (Kind < task_kind::NUM_OF_TASK_KIND)
+				getScheduleService().SchedEnd(Kind);
 			}
 
 	private:
-		SchedGuard() : GottaRelease(true) { getScheduleService().SchedStart(); }
+		SchedGuard(task_kind K)
+		: Kind(K) { getScheduleService().SchedStart(Kind); }
 
+		SchedGuard() = delete;
 		SchedGuard(const SchedGuard& ) = delete;
 		const SchedGuard& operator=(const SchedGuard& ) = delete;
 
-		bool GottaRelease;
+		task_kind Kind;
 		friend class ScheduleService;
 
 		};
@@ -55,12 +58,17 @@ public:
 	priority getPriority() { return Priority; }
 
 	// Call this function when the process want to do some task
-	SchedGuard Schedule() { return SchedGuard(); }
+	SchedGuard Schedule(task_kind K) { return SchedGuard(K); }
+	// For async APIs, like clEnqueue series
+	void ScheduleOnEvent(task_kind K, cl_event* E);
 
 	// Shutdown IPC worker thread
 	void Terminate();
 
 private:
+	ScheduleService& operator=(const ScheduleService& ) = delete;
+	ScheduleService(const ScheduleService& ) = delete;
+
 	// Internal state of this process
 	bool     IsOnTerminate;
 	bool     IsOnSystemBus;
@@ -92,8 +100,8 @@ private:
 
 	void StartBus();
 
-	void SchedStart();
-	void SchedEnd();
+	void SchedStart(task_kind );
+	void SchedEnd(task_kind );
 
 	void LowPrioProcWorker();
 	void HighPrioProcWorker();
