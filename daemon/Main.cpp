@@ -154,7 +154,7 @@ int SetHighPrioTaskBitmap(sd_bus_message* Msg, void* UserData,
 
 	if (Ret < 0) {
 		D.Log(DaemonKeeper::loglevel::ERROR,
-		      "SetHighPrioProc failed to read message: %s\n", strerror(-Ret));
+		      "SetHighPrioTaskBitmap failed to read message: %s\n", strerror(-Ret));
 		return Ret;
 		}
 
