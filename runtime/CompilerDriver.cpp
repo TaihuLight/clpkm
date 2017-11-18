@@ -36,9 +36,10 @@ namespace {
 		ssize_t Ret = 0;
 		while (Offset < Size) {
 			Ret = write(Fd, CharBuf + Offset, Size - Offset);
-			if (Ret < 0)
+			if (Ret >= 0)
+				Offset += Ret;
+			else if (errno != EINTR)
 				return Ret;
-			Offset += Ret;
 			}
 		return Offset;
 		}
