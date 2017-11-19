@@ -118,22 +118,8 @@ void UpdateProcBitmap(task_bitmap& ProcMap, task_bitmap NewMap) {
 
 	// Increamentally update the global bitmap
 	for (size_t Kind = 0; Kind < NumOfTaskKind; ++Kind) {
-
-		unsigned ThisCount = Task.CountOfEachTaskKind[Kind];
-
-		// Update the count of process running this kind of task
-		ThisCount += static_cast<unsigned>(NewMap & 1)
-		             - static_cast<unsigned>(OldMap & 1);
-
-		// Update the corresponding bit of this kind in the global bitmap
-		NewGblMap ^= (-static_cast<task_bitmap>(IsNotZero(ThisCount)) ^ NewGblMap)
-		             & (static_cast<task_bitmap>(1) << Kind);
-
-		// Prep for the next kind
-		OldMap >>= 1;
-		NewMap >>= 1;
-		Task.CountOfEachTaskKind[Kind] = ThisCount;
-
+		UpdateGlobalBitmap(
+				NewGblMap, Task.CountOfEachTaskKind[Kind], Kind, OldMap, NewMap);
 		}
 
 	Task.GlobalBitmap = NewGblMap;
