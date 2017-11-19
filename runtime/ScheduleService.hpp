@@ -9,11 +9,11 @@
 #define __CLPKM__SCHEDULE_SERVICE_HPP__
 
 #include "TaskKind.hpp"
-#include <atomic>
 #include <condition_variable>
 #include <mutex>
 #include <thread>
 #include <systemd/sd-bus.h>
+#include <variant>
 
 
 
@@ -52,10 +52,10 @@ public:
 
 		};
 
-	const std::string& getCompilerPath() { return CompilerPath; }
+	const std::string& getCompilerPath() const { return CompilerPath; }
 
-	uint64_t getCRThreshold() { return Threshold; }
-	priority getPriority() { return Priority; }
+	uint64_t getCRThreshold() const { return Threshold; }
+	priority getPriority() const { return Priority; }
 
 	// Call this function when the process want to do some task
 	SchedGuard Schedule(task_kind K) { return SchedGuard(K); }
@@ -84,15 +84,24 @@ private:
 	std::string CompilerPath;
 	uint64_t    Threshold;
 
-	// For low priority tasks, RunLevel is either 0 or 1, indicating if there is
-	// any high priority task running
-	// For high priority tasks, RunLevel is the number of tasks running in this
-	// process
-	std::atomic<unsigned> RunLevel;
+	// Task management related
+	static constexpr size_t NumOfTaskKind = static_cast<size_t>(
+			task_kind::NUM_OF_TASK_KIND);
 
-	// Condition of RunLevel
-	std::mutex              Mutex;
-	std::condition_variable CV;
+	typedef struct {
+		unsigned                Count[NumOfTaskKind] = {};
+		std::condition_variable CV;
+		} high_prio_task;
+
+	typedef struct {
+		std::condition_variable CV[NumOfTaskKind];
+		} low_prio_task;
+
+	// Mutex to protect bitmap
+	std::mutex  Mutex;
+	task_bitmap Bitmap;
+
+	std::variant<low_prio_task, high_prio_task> Task;
 
 	// Internal functions
 	ScheduleService();

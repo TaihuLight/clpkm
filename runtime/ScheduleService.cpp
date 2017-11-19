@@ -22,19 +22,16 @@ int RunLevelChangeWatcher(sd_bus_message* Msg, void* UserData,
 
 	(void) ErrorRet;
 
-	auto& RunLevel = *reinterpret_cast<std::atomic<unsigned>*>(UserData);
-	unsigned Level = 1;
+	task_bitmap& Bitmap = *reinterpret_cast<task_bitmap*>(UserData);
 
-	int Ret = sd_bus_message_read(Msg, "b", &Level);
+	int Ret = sd_bus_message_read(Msg, TASK_BITMAP_DBUS_TYPE_CODE, &Bitmap);
 	INTER_ASSERT(Ret >= 0,
 	             "failed to read message from bus: %s", StrError(-Ret).c_str());
 
-	RunLevel = Level;
-
 	getRuntimeKeeper().Log(
 			RuntimeKeeper::loglevel::INFO,
-			"==CLPKM== Run level changed to %d\n",
-			Level);
+			"==CLPKM== Run level changed to %" TASK_BITMAP_PRINTF_SPECIFIER "\n",
+			Bitmap);
 
 	return 1;
 
@@ -47,7 +44,7 @@ int RunLevelChangeWatcher(sd_bus_message* Msg, void* UserData,
 // FIXME: change defaults to system bus
 ScheduleService::ScheduleService()
 : IsOnTerminate(false), IsOnSystemBus(false), Priority(priority::LOW),
-  Bus(nullptr), Slot(nullptr), Threshold(0), RunLevel(0) {
+  Bus(nullptr), Slot(nullptr), Threshold(0), Bitmap(0) {
 
 	if (const char* Fine = getenv("CLPKM_PRIORITY")) {
 		if (!strcmp(Fine, "high"))
@@ -72,8 +69,9 @@ void ScheduleService::Terminate() {
 
 	IsOnTerminate = true;
 
-	if (Priority == priority::HIGH)
-		CV.notify_all();
+	// Notify the IPC worker
+	if (auto HighPrioTask = std::get_if<high_prio_task>(&Task))
+		HighPrioTask->CV.notify_all();
 
 	if (IPCWorker.joinable())
 		IPCWorker.join();
@@ -98,6 +96,7 @@ void ScheduleService::StartBus() {
 
 	// Only low priority tasks need to get config
 	if (Priority != priority::LOW) {
+		Task.emplace<high_prio_task>();
 		IPCWorker = std::thread(&ScheduleService::HighPrioProcWorker, this);
 		return;
 		}
@@ -108,7 +107,7 @@ void ScheduleService::StartBus() {
 			"sender='edu.nctu.sslab.CLPKMSchedSrv',"
 			"interface='edu.nctu.sslab.CLPKMSchedSrv',"
 			"member='RunLevelChanged'",
-			RunLevelChangeWatcher, &RunLevel);
+			RunLevelChangeWatcher, &Bitmap);
 	INTER_ASSERT(Ret >= 0, "failed to add match: %s", StrError(-Ret).c_str());
 
 	sd_bus_error    BusError = SD_BUS_ERROR_NULL;
@@ -124,11 +123,11 @@ void ScheduleService::StartBus() {
 	INTER_ASSERT(Ret >= 0, "call method failed: %s", StrError(-Ret).c_str());
 
 	const char* Path = nullptr;
-	unsigned Level = 1;
 
 	// Note: BOOLEAN uses one int to store its value
 	//       Pass a C++ bool variable here can result in wild memory access
-	Ret = sd_bus_message_read(Msg, "stb", &Path, &Threshold, &Level);
+	Ret = sd_bus_message_read(Msg, "st" TASK_BITMAP_DBUS_TYPE_CODE,
+	                          &Path, &Threshold, &Bitmap);
 	INTER_ASSERT(Ret >= 0, "failed to read message: %s", StrError(-Ret).c_str());
 
 	getRuntimeKeeper().Log(
@@ -136,11 +135,10 @@ void ScheduleService::StartBus() {
 		"==CLPKM== Got config from the service:\n"
 		"==CLPKM==   cc: \"%s\"\n"
 		"==CLPKM==   threshold: %" PRIu64 "\n"
-		"==CLPKM==   level: %d\n",
-		Path, Threshold, Level);
+		"==CLPKM==   level: %" TASK_BITMAP_PRINTF_SPECIFIER "\n",
+		Path, Threshold, Bitmap);
 
 	CompilerPath = Path;
-	RunLevel = Level;
 
 	sd_bus_error_free(&BusError);
 	sd_bus_message_unref(Msg);
@@ -151,28 +149,64 @@ void ScheduleService::StartBus() {
 
 
 
-void ScheduleService::SchedStart(task_kind Kind) {
+void ScheduleService::SchedStart(task_kind K) {
+
+	size_t Kind = static_cast<size_t>(K);
+	task_bitmap Mask = static_cast<task_bitmap>(1) << Kind;
+
 	if (Priority == priority::HIGH) {
-		// Notify the worker that the RunLevel is no longer 0
-		if (RunLevel++ == 0)
-			CV.notify_one();
+
+		auto* HighPrioTask = std::get_if<high_prio_task>(&Task);
+		std::unique_lock<std::mutex> Lock(Mutex);
+
+		unsigned OldCount = HighPrioTask->Count[Kind]++;
+		AssignBits(Bitmap, 1, Mask);
+
+		Lock.unlock();
+
+		// Notify the worker that the bit is no longer 0
+		if (!OldCount)
+			HighPrioTask->CV.notify_one();
+
 		return;
+
 		}
+
 	// Low priority task starts here
+	auto* LowPrioTask = std::get_if<low_prio_task>(&Task);
 	std::unique_lock<std::mutex> Lock(Mutex);
-	// Wait until RunLevel becomes 0
-	CV.wait(Lock, [&]() -> bool {
-		return !RunLevel;
+
+	// Wait until corresponding bit becomes 0
+	LowPrioTask->CV[Kind].wait(Lock, [&]() -> bool {
+		return Mask & ~Bitmap;
 		});
+
 	}
 
-void ScheduleService::SchedEnd(task_kind Kind) {
+void ScheduleService::SchedEnd(task_kind K) {
+
 	if (Priority == priority::LOW)
 		return;
-	// If we reached here, the RunLevel is changed to 0, i.e. no running tasks
-	// Notify the worker to inform the daemon
-	if (--RunLevel == 0)
-		CV.notify_one();
+
+	size_t Kind = static_cast<size_t>(K);
+	task_bitmap Mask = static_cast<task_bitmap>(1) << Kind;
+
+	auto* HighPrioTask = std::get_if<high_prio_task>(&Task);
+	std::unique_lock<std::mutex> Lock(Mutex);
+
+	// Update task count and global bitmap
+	unsigned NewCount = --HighPrioTask->Count[Kind];
+	AssignBits(Bitmap, NewCount, Mask);
+
+	Lock.unlock();
+
+	// Notify the worker if it became 0 again
+	if (!NewCount)
+		HighPrioTask->CV.notify_one();
+
+	}
+
+void ScheduleService::ScheduleOnEvent(task_kind K, cl_event* E) {
 	}
 
 
@@ -180,9 +214,12 @@ void ScheduleService::SchedEnd(task_kind Kind) {
 // Workers
 void ScheduleService::HighPrioProcWorker() {
 
-	// Start from false because every process is initially low priority from the
-	// perspective of the schedule service
-	bool OldRunLevel = false;
+	auto* HighPrioTask = std::get_if<high_prio_task>(&Task);
+	INTER_ASSERT(HighPrioTask != nullptr, "Task is not a high_prio_task!");
+
+	// The task bitmap bitmap of every high priority process is initially 0 from
+	// the perspective of the schedule service
+	task_bitmap OldBitmap = 0;
 
 	while (!IsOnTerminate) {
 
@@ -190,9 +227,8 @@ void ScheduleService::HighPrioProcWorker() {
 
 		// Wait until the termination of this process, or the run level had
 		// changed
-		CV.wait(Lock, [&]() -> bool {
-			bool RunLevelChanged = (OldRunLevel != static_cast<bool>(RunLevel));
-			return IsOnTerminate || RunLevelChanged;
+		HighPrioTask->CV.wait(Lock, [&]() -> bool {
+			return (OldBitmap != Bitmap) || IsOnTerminate;
 			});
 
 		// If we got here due to IsOnTerminate
@@ -208,8 +244,8 @@ void ScheduleService::HighPrioProcWorker() {
 				"edu.nctu.sslab.CLPKMSchedSrv",  // service
 				"/edu/nctu/sslab/CLPKMSchedSrv", // object path
 				"edu.nctu.sslab.CLPKMSchedSrv",  // interface
-				"SetHighPrioProc",               // method name
-				&BusError, &Msg, "b", (OldRunLevel = !OldRunLevel));
+				"SetHighPrioTaskBitmap",         // method name
+				&BusError, &Msg, TASK_BITMAP_DBUS_TYPE_CODE, OldBitmap = Bitmap);
 		INTER_ASSERT(Ret >= 0, "call method failed: %s", StrError(-Ret).c_str());
 
 		unsigned IsGranted = 0;
@@ -230,9 +266,11 @@ void ScheduleService::HighPrioProcWorker() {
 
 void ScheduleService::LowPrioProcWorker() {
 
-	// Start from the RunLevel set by the initial call to GetConfig
-	bool OldRunLevel = static_cast<bool>(RunLevel);
+	auto* LowPrioTask = std::get_if<low_prio_task>(&Task);
+	INTER_ASSERT(LowPrioTask != nullptr, "Task is not a low_prio_task!");
 
+	// Start from the RunLevel set by the initial call to GetConfig
+	task_bitmap OldBitmap = Bitmap;
 	uint64_t Timeout = 0;
 
 	{
@@ -250,6 +288,8 @@ void ScheduleService::LowPrioProcWorker() {
 
 		}
 
+	std::unique_lock<std::mutex> Lock(Mutex);
+
 	while (!IsOnTerminate) {
 
 		// This may change RunLevel
@@ -261,13 +301,20 @@ void ScheduleService::LowPrioProcWorker() {
 
 		// If we reach here, Ret is 0
 		// No more stuff to process at the moment
-		bool NewLevel = RunLevel;
 
-		// If RunLevel changes from high to low, notify those waiting
-		if (OldRunLevel != NewLevel) {
-			if (OldRunLevel == static_cast<bool>(priority::HIGH))
-				CV.notify_all();
-			OldRunLevel = NewLevel;
+		// 1's bits in the map are those changed from 1 to 0
+		task_bitmap ClearedBitmap =
+				OldBitmap & (Bitmap ^ static_cast<task_bitmap>(-1));
+		task_bitmap Mask = 1;
+
+		OldBitmap = Bitmap;
+		Lock.unlock();
+
+		// Notify those changed from 1 to 0
+		for (size_t Kind = 0; Kind < NumOfTaskKind; ++Kind) {
+			if (ClearedBitmap & Mask)
+				LowPrioTask->CV[Kind].notify_all();
+			Mask <<= 1;
 			}
 
 		// sd_bus_wait can only return on signal or timeout
@@ -276,6 +323,8 @@ void ScheduleService::LowPrioProcWorker() {
 		Ret = sd_bus_wait(Bus, Timeout);
 		INTER_ASSERT(Ret >= 0 || Ret == -EINTR,
 		             "failed to wait on bus: %s", StrError(-Ret).c_str());
+
+		Lock.lock();
 
 		}
 

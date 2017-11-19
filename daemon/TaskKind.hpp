@@ -55,10 +55,9 @@ inline T IsNotZero(T Num) {
 
 // Assgin the bits specified by BitMask in Bitmap to 1, if Count is not 0
 template <class T>
-inline bool AssignBits(task_bitmap& Bitmap, T Count, task_bitmap BitMask) {
+inline void AssignBits(task_bitmap& Bitmap, T Count, task_bitmap BitMask) {
 	task_bitmap IsCountNotZero = static_cast<task_bitmap>(IsNotZero(Count));
 	Bitmap ^= (Bitmap ^ -IsCountNotZero) & BitMask;
-	return IsCountNotZero;
 	}
 
 // Useful function to update task count and global bitmap
