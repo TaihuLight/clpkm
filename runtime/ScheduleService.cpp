@@ -7,6 +7,7 @@
 
 #include "ErrorHandling.hpp"
 #include "ScheduleService.hpp"
+#include "LookupVendorImpl.hpp"
 #include <cstdlib>
 #include <cstring>
 
@@ -38,6 +39,37 @@ int RunLevelChangeWatcher(sd_bus_message* Msg, void* UserData,
 	}
 
 } // namespace
+
+
+
+void ScheduleService::SchedGuard::BindToEvent(cl_event E,
+                                              bool GottaReleaseEvent) {
+
+	if (E == NULL)
+		return;
+
+	intptr_t Data = static_cast<intptr_t>(Kind);
+	Kind = task_kind::NUM_OF_TASK_KIND;
+
+	if (GottaReleaseEvent)
+		Data = -Data;
+
+	cl_int Ret = Lookup<OclAPI::clSetEventCallback>()(
+			E, CL_COMPLETE, SchedEndOnEventCallback, reinterpret_cast<void*>(Data));
+	INTER_ASSERT(Ret == CL_SUCCESS, "failed to set event callback!");
+
+	}
+
+void CL_CALLBACK ScheduleService::SchedGuard::SchedEndOnEventCallback(
+		cl_event Event, cl_int Status, void* UserData) {
+	(void) Status;
+	intptr_t Kind = reinterpret_cast<intptr_t>(UserData);
+	if (Kind < 0) {
+		Kind = -Kind;
+		Lookup<OclAPI::clReleaseEvent>()(Event);
+		}
+	getScheduleService().SchedEnd(static_cast<task_kind>(Kind));
+	}
 
 
 
@@ -204,9 +236,6 @@ void ScheduleService::SchedEnd(task_kind K) {
 	if (!NewCount)
 		HighPrioTask->CV.notify_one();
 
-	}
-
-void ScheduleService::ScheduleOnEvent(task_kind K, cl_event* E) {
 	}
 
 

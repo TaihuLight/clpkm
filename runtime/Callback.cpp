@@ -9,6 +9,7 @@
 
 #include "Callback.hpp"
 #include "ErrorHandling.hpp"
+#include "ScheduleService.hpp"
 #include <algorithm>
 
 using namespace CLPKM;
@@ -139,6 +140,9 @@ void CLPKM::MetaEnqueue(CallbackData* Work, cl_uint NumWaiting,
 	clEvent EventRead(NULL);
 	std::unique_lock<std::recursive_mutex> LockWork(*Work->Mutex);
 
+	auto& Srv = getScheduleService();
+	auto SC = Srv.Schedule(task_kind::COMPUTING);
+
 	// Enqueue kernel and read data
 	cl_int Ret = Lookup<OclAPI::clEnqueueNDRangeKernel>()(
 			Work->Queue, Work->Kernel.get(), Work->WorkDim, Work->GWO.data(),
@@ -148,6 +152,8 @@ void CLPKM::MetaEnqueue(CallbackData* Work, cl_uint NumWaiting,
 
 	cl_int* HostHeader = Work->HostMetadata.data() + Work->HeaderOffset;
 	const size_t HeaderSize = Work->HostMetadata.size() - Work->HeaderOffset;
+
+	auto SM = Srv.Schedule(task_kind::MEMCPY);
 
 	Ret = Lookup<OclAPI::clEnqueueReadBuffer>()(
 		Work->Queue, Work->DeviceHeader.get(), CL_FALSE,
@@ -254,6 +260,8 @@ void CL_CALLBACK CLPKM::ResumeOrFinish(cl_event Event, cl_int ExecStatus,
 
 		cl_int* HostHeader = Work->HostMetadata.data() + Work->HeaderOffset;
 		const size_t HeaderSize = Work->HostMetadata.size() - Work->HeaderOffset;
+
+		auto S = getScheduleService().Schedule(task_kind::MEMCPY);
 
 		Ret = Lookup<OclAPI::clEnqueueWriteBuffer>()(
 				Work->Queue, Work->DeviceHeader.get(), CL_FALSE,

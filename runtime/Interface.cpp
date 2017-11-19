@@ -40,10 +40,10 @@ cl_context clCreateContext(const cl_context_properties* Properties,
                                                       void* ),
                            void* UserData,
                            cl_int* ErrorRet) {
-	auto S = getScheduleService().Schedule();
+	auto S = getScheduleService().Schedule(task_kind::COMPUTING);
 	return Lookup<OclAPI::clCreateContext>()(Properties, NumOfDevices, Devices,
 	                                         Notify, UserData, ErrorRet);
-}
+	}
 
 cl_command_queue clCreateCommandQueue(cl_context Context, cl_device_id Device,
                                       cl_command_queue_properties Properties,
@@ -410,9 +410,18 @@ cl_int clEnqueueNDRangeKernel(cl_command_queue Queue,
 	auto& Srv = getScheduleService();
 
 	if (Srv.getPriority() != ScheduleService::priority::LOW) {
-		// TODO: set event callback
-		return Lookup<OclAPI::clEnqueueNDRangeKernel>()(
-				Queue, K, WorkDim, GWO, GWS, LWS, NumOfWaiting, WaitingList, Event);
+		// Claim computing resource
+		auto S = Srv.Schedule(task_kind::COMPUTING);
+		// Prep cl_event
+		cl_event  E = NULL;
+		cl_event* PtrEv = (Event == nullptr) ? &E : Event;
+		// Enqueue and get cl_event
+		cl_int Ret = Lookup<OclAPI::clEnqueueNDRangeKernel>()(
+				Queue, K, WorkDim, GWO, GWS, LWS, NumOfWaiting, WaitingList, PtrEv);
+		// If it succeed, clean up when the task finished but release now
+		if (Ret == CL_SUCCESS)
+			S.BindToEvent(*PtrEv, Event == nullptr);
+		return Ret;
 		}
 
 	auto& RT = getRuntimeKeeper();
@@ -822,11 +831,21 @@ cl_int clEnqueueReadBuffer(cl_command_queue Queue,
 
 	auto venEnqueueReadBuffer = Lookup<OclAPI::clEnqueueReadBuffer>();
 
-	if (getScheduleService().getPriority() != ScheduleService::priority::LOW) {
-		// TODO
-		return venEnqueueReadBuffer(
+	auto& Srv = getScheduleService();
+	auto S = Srv.Schedule(task_kind::MEMCPY);
+
+	if (Srv.getPriority() != ScheduleService::priority::LOW) {
+		// Prep cl_event
+		cl_event  E = NULL;
+		cl_event* PtrEv = (Event == nullptr) ? &E : Event;
+		// Enqueue and get cl_event
+		cl_int Ret = venEnqueueReadBuffer(
 				Queue, Buffer, Blocking, Offset, Size, HostPtr, NumOfWaiting,
-				WaitingList, Event);
+				WaitingList, PtrEv);
+		// If it succeed, clean up when the task finished but release now
+		if (Ret == CL_SUCCESS)
+			S.BindToEvent(*PtrEv, Event == nullptr);
+		return Ret;
 		}
 
 	// Invoke with new waiting list and pointer to return the event object
@@ -859,13 +878,22 @@ cl_int clEnqueueWriteBuffer(cl_command_queue Queue,
 
 	auto venEnqueueWriteBuffer = Lookup<OclAPI::clEnqueueWriteBuffer>();
 
-	if (getScheduleService().getPriority() != ScheduleService::priority::LOW) {
-		// TODO
-		return venEnqueueWriteBuffer(
-				Queue, Buffer, Blocking, Offset, Size, HostPtr, NumOfWaiting,
-				WaitingList, Event);
-		}
+	auto& Srv = getScheduleService();
+	auto S = Srv.Schedule(task_kind::MEMCPY);
 
+	if (Srv.getPriority() != ScheduleService::priority::LOW) {
+		// Prep cl_event
+		cl_event  E = NULL;
+		cl_event* PtrEv = (Event == nullptr) ? &E : Event;
+		// Enqueue and get cl_event
+		cl_int Ret = venEnqueueWriteBuffer(
+				Queue, Buffer, Blocking, Offset, Size, HostPtr, NumOfWaiting,
+				WaitingList, PtrEv);
+		// If it succeed, clean up when the task finished but release now
+		if (Ret == CL_SUCCESS)
+			S.BindToEvent(*PtrEv, Event == nullptr);
+		return Ret;
+		}
 
 	auto WriteBuffer = [=](const cl_event* NewWaitingList, size_t NewNumOfWaiting,
 	                       cl_event* AltEvent) -> cl_int {
@@ -995,11 +1023,21 @@ cl_int clEnqueueReadImage(cl_command_queue Queue,
 
 	auto venEnqueueReadImage = Lookup<OclAPI::clEnqueueReadImage>();
 
-	if (getScheduleService().getPriority() != ScheduleService::priority::LOW) {
-		// TODO
-		return venEnqueueReadImage(
+	auto& Srv = getScheduleService();
+	auto S = Srv.Schedule(task_kind::MEMCPY);
+
+	if (Srv.getPriority() != ScheduleService::priority::LOW) {
+		// Prep cl_event
+		cl_event  E = NULL;
+		cl_event* PtrEv = (Event == nullptr) ? &E : Event;
+		// Enqueue and get cl_event
+		cl_int Ret = venEnqueueReadImage(
 				Queue, Image, Blocking, Origin, Region, RowPitch, SlicePitch, Ptr,
-				NumOfWaiting, WaitingList, Event);
+				NumOfWaiting, WaitingList, PtrEv);
+		// If it succeed, clean up when the task finished but release now
+		if (Ret == CL_SUCCESS)
+			S.BindToEvent(*PtrEv, Event == nullptr);
+		return Ret;
 		}
 
 	auto ReadImage = [=](const cl_event* NewWaitingList, size_t NewNumOfWaiting,
@@ -1033,11 +1071,21 @@ cl_int clEnqueueWriteImage(cl_command_queue Queue,
 
 	auto venEnqueueWriteImage = Lookup<OclAPI::clEnqueueWriteImage>();
 
-	if (getScheduleService().getPriority() != ScheduleService::priority::LOW) {
-		// TODO
-		return venEnqueueWriteImage(
+	auto& Srv = getScheduleService();
+	auto S = Srv.Schedule(task_kind::MEMCPY);
+
+	if (Srv.getPriority() != ScheduleService::priority::LOW) {
+		// Prep cl_event
+		cl_event  E = NULL;
+		cl_event* PtrEv = (Event == nullptr) ? &E : Event;
+		// Enqueue and get cl_event
+		cl_int Ret = venEnqueueWriteImage(
 				Queue, Image, Blocking, Origin, Region, RowPitch, SlicePitch, Ptr,
-				NumOfWaiting, WaitingList, Event);
+				NumOfWaiting, WaitingList, PtrEv);
+		// If it succeed, clean up when the task finished but release now
+		if (Ret == CL_SUCCESS)
+			S.BindToEvent(*PtrEv, Event == nullptr);
+		return Ret;
 		}
 
 	auto WriteImage = [=](const cl_event* NewWaitingList, size_t NewNumOfWaiting,
@@ -1069,11 +1117,21 @@ cl_int clEnqueueCopyBuffer(cl_command_queue Queue,
 
 	auto venEnqueueCopyBuffer = Lookup<OclAPI::clEnqueueCopyBuffer>();
 
-	if (getScheduleService().getPriority() != ScheduleService::priority::LOW) {
-		// TODO
-		return venEnqueueCopyBuffer(
+	auto& Srv = getScheduleService();
+	auto S = Srv.Schedule(task_kind::MEMCPY);
+
+	if (Srv.getPriority() != ScheduleService::priority::LOW) {
+		// Prep cl_event
+		cl_event  E = NULL;
+		cl_event* PtrEv = (Event == nullptr) ? &E : Event;
+		// Enqueue and get cl_event
+		cl_int Ret = venEnqueueCopyBuffer(
 				Queue, SrcBuffer, DstBuffer, SrcOffset, DstOffset, Size,
-				NumOfWaiting, WaitingList, Event);
+				NumOfWaiting, WaitingList, PtrEv);
+		// If it succeed, clean up when the task finished but release now
+		if (Ret == CL_SUCCESS)
+			S.BindToEvent(*PtrEv, Event == nullptr);
+		return Ret;
 		}
 
 	auto CopyBuffer = [=](const cl_event* NewWaitingList, size_t NewNumOfWaiting,
@@ -1105,11 +1163,21 @@ cl_int clEnqueueCopyBufferToImage(cl_command_queue Queue,
 
 	auto venEnqueueCopy2Image = Lookup<OclAPI::clEnqueueCopyBufferToImage>();
 
-	if (getScheduleService().getPriority() != ScheduleService::priority::LOW) {
-		// TODO
-		return venEnqueueCopy2Image(
+	auto& Srv = getScheduleService();
+	auto S = Srv.Schedule(task_kind::MEMCPY);
+
+	if (Srv.getPriority() != ScheduleService::priority::LOW) {
+		// Prep cl_event
+		cl_event  E = NULL;
+		cl_event* PtrEv = (Event == nullptr) ? &E : Event;
+		// Enqueue and get cl_event
+		cl_int Ret = venEnqueueCopy2Image(
 				Queue, SrcBuffer, DstImage, SrcOffset, DstOrigin, Region,
-				NumOfWaiting, WaitingList, Event);
+				NumOfWaiting, WaitingList, PtrEv);
+		// If it succeed, clean up when the task finished but release now
+		if (Ret == CL_SUCCESS)
+			S.BindToEvent(*PtrEv, Event == nullptr);
+		return Ret;
 		}
 
 	auto Copy2Image = [=](const cl_event* NewWaitingList, size_t NewNumOfWaiting,

@@ -9,11 +9,14 @@
 #define __CLPKM__SCHEDULE_SERVICE_HPP__
 
 #include "TaskKind.hpp"
+
 #include <condition_variable>
 #include <mutex>
 #include <thread>
 #include <systemd/sd-bus.h>
 #include <variant>
+
+#include <CL/opencl.h>
 
 
 
@@ -39,6 +42,10 @@ public:
 				getScheduleService().SchedEnd(Kind);
 			}
 
+		// For async APIs, like clEnqueue series
+		void BindToEvent(cl_event E, bool GottaReleaseEvent);
+		static void CL_CALLBACK SchedEndOnEventCallback(cl_event , cl_int , void* );
+
 	private:
 		SchedGuard(task_kind K)
 		: Kind(K) { getScheduleService().SchedStart(Kind); }
@@ -59,8 +66,6 @@ public:
 
 	// Call this function when the process want to do some task
 	SchedGuard Schedule(task_kind K) { return SchedGuard(K); }
-	// For async APIs, like clEnqueue series
-	void ScheduleOnEvent(task_kind K, cl_event* E);
 
 	// Shutdown IPC worker thread
 	void Terminate();
