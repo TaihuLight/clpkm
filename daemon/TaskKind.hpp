@@ -53,6 +53,14 @@ inline T IsNotZero(T Num) {
 	return ((Num | -Num) >> ((sizeof(T) << 3) - 1)) & 1;
 	}
 
+// Assgin the bits specified by BitMask in Bitmap to 1, if Count is not 0
+template <class T>
+inline bool AssignBits(task_bitmap& Bitmap, T Count, task_bitmap BitMask) {
+	task_bitmap IsCountNotZero = static_cast<task_bitmap>(IsNotZero(Count));
+	Bitmap ^= (Bitmap ^ -IsCountNotZero) & BitMask;
+	return IsCountNotZero;
+	}
+
 // Useful function to update task count and global bitmap
 template <class T>
 void UpdateGlobalBitmap(task_bitmap& GblMap, T& Count, size_t BitIdx,
@@ -68,8 +76,7 @@ void UpdateGlobalBitmap(task_bitmap& GblMap, T& Count, size_t BitIdx,
 	NewCount += (NewProcMap & BitMask) >> BitIdx;
 
 	// Update the corresponding bit of this kind in the global bitmap
-	NewGblMap ^= (-static_cast<task_bitmap>(IsNotZero(NewCount)) ^ NewGblMap)
-	             & BitMask;
+	AssignBits(NewGblMap, NewCount, BitMask);
 
 	GblMap = NewGblMap;
 	Count = NewCount;
