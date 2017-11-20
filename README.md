@@ -62,8 +62,7 @@ Building CLPKM
 --------------------
 
 ```
-$ cd ../..
-$ cd <CLPKM-src-dir>
+$ cd ../../<CLPKM-src-dir>
 $ cd inliner && make LLVM_CONFIG=<llvm-install-dir>/bin/llvm-config -j 24
 $ cd ../rename-lst-gen && make LLVM_CONFIG=<llvm-install-dir>/bin/llvm-config -j 24
 $ cd ../cc && make LLVM_CONFIG=<llvm-install-dir>/bin/llvm-config -j 24
@@ -73,16 +72,16 @@ $ cd ../runtime && make -j 24
 
 Setup configurations
 --------------------
+Change the path of tool to the llvm we just built:
 
 ```
-cd ..
-
-# Change the path of tool to the llvm we just built
-vim clpkm.sh
-
-# Create a new configuration
-vim clpkm.conf
+$ cd ..
+$ vim clpkm.sh
 ```
+
+Create a new configuration:
+
+	$ vim clpkm.conf
 
 configuration example:
 
@@ -97,12 +96,12 @@ Using CLPKM
 ====================
 Start the daemon first, for example run it on the terminal, user bus:
 
-	<CLPKM-src-dir>/clpkm-daemon terminal user <CLPKM-src-dir>/clpkm.conf
+	$ <CLPKM-src-dir>/clpkm-daemon terminal user <CLPKM-src-dir>/clpkm.conf
 
 Run a OpenCL application as a low priority process, with diagnostic info:
 
-	env CLPKM_PRIORITY=low CLPKM_LOGLEVEL=debug LD_PRELOAD=<CLPKM-src-dir>/runtime/libclpkm.so <command-to-run-ocl-app>
+	$ env CLPKM_PRIORITY=low CLPKM_LOGLEVEL=debug LD_PRELOAD=<CLPKM-src-dir>/runtime/libclpkm.so <command-to-run-ocl-app>
 
 Run a application as high priority task:
 
-	env CLPKM_PRIORITY=high LD_PRELOAD=<CLPKM-src-dir>/runtime/libclpkm.so <command-to-run-ocl-app>
+	$ env CLPKM_PRIORITY=high LD_PRELOAD=<CLPKM-src-dir>/runtime/libclpkm.so <command-to-run-ocl-app>
