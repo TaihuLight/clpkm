@@ -102,7 +102,7 @@ void ScheduleService::Terminate() {
 	IsOnTerminate = true;
 
 	// Notify the IPC worker
-	if (auto HighPrioTask = std::get_if<high_prio_task>(&Task))
+	if (auto* HighPrioTask = std::get_if<high_prio_task>(&Task))
 		HighPrioTask->CV.notify_all();
 
 	if (IPCWorker.joinable())
@@ -156,8 +156,6 @@ void ScheduleService::StartBus() {
 
 	const char* Path = nullptr;
 
-	// Note: BOOLEAN uses one int to store its value
-	//       Pass a C++ bool variable here can result in wild memory access
 	Ret = sd_bus_message_read(Msg, "st" TASK_BITMAP_DBUS_TYPE_CODE,
 	                          &Path, &Threshold, &Bitmap);
 	INTER_ASSERT(Ret >= 0, "failed to read message: %s", StrError(-Ret).c_str());
@@ -279,6 +277,8 @@ void ScheduleService::HighPrioProcWorker() {
 
 		unsigned IsGranted = 0;
 
+		// Note: BOOLEAN uses one int to store its value
+		//       Pass a C++ bool variable here can result in wild memory access
 		Ret = sd_bus_message_read(Msg, "b", &IsGranted);
 		INTER_ASSERT(Ret >= 0,
 		             "failed to read message: %s",
