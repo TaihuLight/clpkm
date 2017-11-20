@@ -62,10 +62,7 @@ struct llvm::yaml::MappingTraits<KernelProfile> {
 		}
 	};
 
-template <>
-struct llvm::yaml::SequenceElementTraits<KernelProfile> {
-	static const bool flow = false;
-	};
+LLVM_YAML_IS_SEQUENCE_VECTOR(KernelProfile)
 
 #endif
 
