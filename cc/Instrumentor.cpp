@@ -7,6 +7,7 @@
 
 #include "Instrumentor.hpp"
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 using namespace clang;
@@ -108,9 +109,27 @@ bool Instrumentor::VisitDeclStmt(DeclStmt* DS) {
 
 bool Instrumentor::VisitVarDecl(VarDecl* VD) {
 
-	if (VD != nullptr)
-		LVT.AddTrack(VD);
+	if (VD == nullptr)
+		return true;
 
+	static const std::unordered_set<std::string> IgnoreTypeSet = {
+			"sampler_t", "image1d_t", "image1d_buffer_t", "image1d_array_t",
+			"image2d_t", "image2d_array_t", "image3d_t"};
+
+	QualType QT = VD->getType().getDesugaredType(VD->getASTContext());
+	std::string TypeStr = QT.getUnqualifiedType().getAsString();
+
+	if (IgnoreTypeSet.find(TypeStr) != IgnoreTypeSet.end())
+		return true;
+
+	// Try to remove something like "__read_only "
+	if (auto Pos = TypeStr.rfind(' '); Pos != std::string::npos) {
+		TypeStr = TypeStr.erase(0, Pos + 1);
+		if (IgnoreTypeSet.find(TypeStr) != IgnoreTypeSet.end())
+			return true;
+		}
+
+	LVT.AddTrack(VD);
 	return true;
 
 	}

@@ -21,7 +21,7 @@ Install prerequisites
 --------------------
 Arch Linux:
 
-	# pacman -S libclc yaml-cpp
+	# pacman -S boost libclc yaml-cpp
 
 Building patched clang
 --------------------
