@@ -2,7 +2,8 @@ CXX        := g++
 PKG_CONFIG := pkg-config
 
 CPPFLAGS = -D_FORTIFY_SOURCE=2
-CXXFLAGS = -Wall -Wextra -pedantic -fstack-protector-strong -g3 -Og \
+CXXFLAGS = $(shell $(PKG_CONFIG) --cflags libsystemd) \
+           -Wall -Wextra -pedantic -fstack-protector-strong -g3 -Og \
            -DCL_USE_DEPRECATED_OPENCL_1_2_APIS -Wno-ignored-attributes \
            # -O2 -ftree-vectorize -fno-plt -flto
 LDFLAGS  = -Wl,-O1,--sort-common,--as-needed,-z,relro,-z,now # -s

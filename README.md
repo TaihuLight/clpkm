@@ -70,6 +70,7 @@ Building CLPKM
 --------------------
 
 ```
+$ git clone --depth 1 https://<user-name>@bitbucket.org/TOCK-Chiu/CLPKM.git "$CLPKM_SRC_DIR"
 $ cd "$CLPKM_SRC_DIR"
 $ cd inliner && make LLVM_CONFIG="$LLVM_INSTALL_DIR"/bin/llvm-config -j 24
 $ cd ../rename-lst-gen && make LLVM_CONFIG="$LLVM_INSTALL_DIR"/bin/llvm-config -j 24
