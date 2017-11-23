@@ -114,3 +114,15 @@ Run a OpenCL application as a low priority process, with diagnostic output enabl
 Run a application as high priority task:
 
 	$ env CLPKM_PRIORITY=high LD_PRELOAD="$CLPKM_SRC_DIR"/runtime/libclpkm.so <command-to-run-ocl-app>
+
+Benchmark
+====================
+TBD.
+
+Known Issue
+====================
+TBD.
+
+Future Work
+====================
+TBD.

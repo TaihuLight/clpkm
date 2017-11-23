@@ -38,6 +38,25 @@ int RunLevelChangeWatcher(sd_bus_message* Msg, void* UserData,
 
 	}
 
+int DaemonNameOwnerChangeWatcher(sd_bus_message* Msg, void* UserData,
+                                 sd_bus_error* ErrorRet) {
+
+	(void) UserData;
+	(void) ErrorRet;
+
+	const char* Name = nullptr;
+	const char* OldOwner = nullptr;
+	const char* NewOwner = nullptr;
+
+	int Ret = sd_bus_message_read(Msg, "sss", &Name, &OldOwner, &NewOwner);
+
+	INTER_ASSERT(Ret >= 0, "failed to read message: %s", StrError(-Ret).c_str());
+	INTER_ASSERT(NewOwner[0] != '\0', "the daemon has disconnected!");
+
+	return 1;
+
+	}
+
 } // namespace
 
 
@@ -76,7 +95,7 @@ void CL_CALLBACK ScheduleService::SchedGuard::SchedEndOnEventCallback(
 // FIXME: change defaults to system bus
 ScheduleService::ScheduleService()
 : IsOnTerminate(false), IsOnSystemBus(false), Priority(priority::LOW),
-  Bus(nullptr), Slot(nullptr), Threshold(0), Bitmap(0) {
+  Bus(nullptr), Threshold(0), Bitmap(0) {
 
 	if (const char* Fine = getenv("CLPKM_PRIORITY")) {
 		if (!strcmp(Fine, "high"))
@@ -109,7 +128,6 @@ void ScheduleService::Terminate() {
 		IPCWorker.join();
 
 	// Clean up and reset to NULL
-	Slot = sd_bus_slot_unref(Slot);
 	Bus = sd_bus_flush_close_unref(Bus);
 
 	}
@@ -134,12 +152,22 @@ void ScheduleService::StartBus() {
 		}
 
 	Ret = sd_bus_add_match(
-			Bus, &Slot,
+			Bus, nullptr,
 			"type='signal',"
 			"sender='edu.nctu.sslab.CLPKMSchedSrv',"
 			"interface='edu.nctu.sslab.CLPKMSchedSrv',"
 			"member='RunLevelChanged'",
 			RunLevelChangeWatcher, &Bitmap);
+	INTER_ASSERT(Ret >= 0, "failed to add match: %s", StrError(-Ret).c_str());
+
+	Ret = sd_bus_add_match(
+			Bus, nullptr,
+			"type='signal',"
+			"sender='org.freedesktop.DBus',"
+			"interface='org.freedesktop.DBus',"
+			"member='NameOwnerChanged',"
+			"arg0='edu.nctu.sslab.CLPKMSchedSrv'",
+			DaemonNameOwnerChangeWatcher, nullptr);
 	INTER_ASSERT(Ret >= 0, "failed to add match: %s", StrError(-Ret).c_str());
 
 	sd_bus_error    BusError = SD_BUS_ERROR_NULL;

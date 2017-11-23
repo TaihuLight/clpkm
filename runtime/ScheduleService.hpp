@@ -80,7 +80,6 @@ private:
 	priority Priority;
 
 	sd_bus*      Bus;
-	sd_bus_slot* Slot;
 
 	// Task related stuff
 	std::thread IPCWorker;

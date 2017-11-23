@@ -292,10 +292,8 @@ int main(int ArgCount, const char* ArgVar[]) {
 		return -1;
 		}
 
-	sdBusSlot Slot = nullptr;
-
 	Ret = sd_bus_add_object_vtable(
-			Bus.get(), &Slot.get(),
+			Bus.get(), nullptr,
 			"/edu/nctu/sslab/CLPKMSchedSrv",
 			"edu.nctu.sslab.CLPKMSchedSrv",
 			SchedSrvVTable, nullptr);
@@ -307,7 +305,7 @@ int main(int ArgCount, const char* ArgVar[]) {
 		}
 
 	Ret = sd_bus_add_match(
-			Bus.get(), &Slot.get(),
+			Bus.get(), nullptr,
 			"type='signal',"
 			"sender='org.freedesktop.DBus',"
 			"interface='org.freedesktop.DBus',"
