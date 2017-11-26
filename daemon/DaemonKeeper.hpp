@@ -12,6 +12,7 @@
 
 #include <cerrno>
 #include <cstdio>
+#include <ctime>
 #include <syslog.h>
 #include <unistd.h>
 
@@ -43,8 +44,11 @@ public:
 	void Log(T&& ... FormatStr) {
 		if (RunMode == run_mode::DAEMON)
 			syslog(LOG_INFO, FormatStr...);
-		else
+		else {
+			UpdateTimeString();
+			fprintf(stderr, "[%s] ", TimeStrBuffer);
 			fprintf(stderr, FormatStr...);
+			}
 		}
 
 	template <class ... T>
@@ -53,8 +57,11 @@ public:
 			return;
 		if (RunMode == run_mode::DAEMON)
 			syslog(static_cast<int>(Level), FormatStr...);
-		else
+		else {
+			UpdateTimeString();
+			fprintf(stderr, "[%s] ", TimeStrBuffer);
 			fprintf(stderr, FormatStr...);
+			}
 		}
 
 	int Daemonize() noexcept;
@@ -65,9 +72,14 @@ private:
 
 	DaemonKeeper() : LogLevel(loglevel::DEBUG), RunMode(run_mode::TERMINAL) { }
 
+	void UpdateTimeString() noexcept;
+
 	//
 	loglevel LogLevel;
 	run_mode RunMode;
+
+	time_t Time = 0;
+	char TimeStrBuffer[128] = {};
 
 	friend DaemonKeeper& getDaemonKeeper(void);
 
