@@ -74,6 +74,8 @@ struct CallbackData {
 	std::chrono::high_resolution_clock::time_point LastCall;
 	unsigned Counter;
 
+	std::vector<std::array<unsigned, 2>> Bucket;
+
 	std::unique_ptr<std::recursive_mutex> Mutex;
 
 	};

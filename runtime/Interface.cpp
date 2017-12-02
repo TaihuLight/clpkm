@@ -947,11 +947,20 @@ void* clEnqueueMapBuffer(cl_command_queue Queue,
 
 	auto venEnqueueMapBuffer = Lookup<OclAPI::clEnqueueMapBuffer>();
 
-	if (getScheduleService().getPriority() != ScheduleService::priority::LOW) {
-		// TODO
-		return venEnqueueMapBuffer(
+	auto& Srv = getScheduleService();
+	auto S = Srv.Schedule(task_kind::COMPUTING);
+
+	if (Srv.getPriority() != ScheduleService::priority::LOW) {
+		// Prep cl_event
+		cl_event  E = NULL;
+		cl_event* PtrEv = (Event == nullptr) ? &E : Event;
+		// Enqueue and get cl_event
+		void* Ret = venEnqueueMapBuffer(
 				Queue, Buffer, Blocking, MapFlags, Offset, Size, NumOfWaiting,
-				WaitingList, Event, ErrorCode);
+				WaitingList, PtrEv, ErrorCode);
+		if (Ret != nullptr)
+			S.BindToEvent(*PtrEv, Event == nullptr);
+		return Ret;
 		}
 
 	void* MapPtr = nullptr;
@@ -988,7 +997,6 @@ cl_int clEnqueueUnmapMemObject(cl_command_queue Queue,
 	auto venEnqueueUnmap = Lookup<OclAPI::clEnqueueUnmapMemObject>();
 
 	if (getScheduleService().getPriority() != ScheduleService::priority::LOW) {
-		// TODO
 		return venEnqueueUnmap(Queue, MemObj, MappedPtr, NumOfWaiting,
 		                       WaitingList, Event);
 		}

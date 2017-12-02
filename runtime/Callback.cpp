@@ -67,7 +67,15 @@ void LogEventProfInfo(RuntimeKeeper& RT, cl_event Event) {
 // Return 0 if finished, 1 if yet finished, -1 if yet finished and require
 // updating header
 template <class I>
-int UpdateHeader(I First, I Last, size_t WorkGrpSize) {
+int UpdateHeader(I First, I Last, size_t WorkGrpSize,
+                 std::vector<std::array<unsigned, 2>>& Bucket) {
+
+	auto& RT = getRuntimeKeeper();
+	bool ShouldLog = RT.shouldLog(RuntimeKeeper::loglevel::DEBUG);
+
+	if (ShouldLog)
+		Bucket.resize(0);
+
 	int Progress = 0;
 
 	while (First != Last) {
@@ -79,6 +87,13 @@ int UpdateHeader(I First, I Last, size_t WorkGrpSize) {
 		size_t TagCount = 0;
 		// Traverse all work items in this group
 		for (I Front = First; Front < Rear; ++Front) {
+			if (ShouldLog) {
+				auto Sign = *Front >> ((sizeof(*Front) << 3) - 1);
+				size_t Abs = (Sign ^ *Front) - Sign;
+				if (Abs >= Bucket.size())
+					Bucket.resize(Abs + 1);
+				++Bucket[Abs][Sign + 1];
+				}
 			// This work-item has finished the task
 			if (*Front == 0)
 				continue;
@@ -102,6 +117,15 @@ int UpdateHeader(I First, I Last, size_t WorkGrpSize) {
 			Progress = -1;
 			}
 		First = Rear;
+		}
+
+	if (ShouldLog) {
+		RT.Log("==CLPKM== Header: [\"0\": {%u, %u}", Bucket[0][1], Bucket[0][0]);
+		for (size_t Idx = 1; Idx < Bucket.size(); ++Idx) {
+			if (Bucket[Idx][1] || Bucket[Idx][0])
+				RT.Log(", \"%zu\": {%u, %u}", Idx, Bucket[Idx][1], Bucket[Idx][0]);
+			}
+		RT.Log("]\n");
 		}
 
 	return Progress;
@@ -230,7 +254,8 @@ void CL_CALLBACK CLPKM::ResumeOrFinish(cl_event Event, cl_int ExecStatus,
 	// Step 2
 	// Inspect header, summarizing progress
 	int Progress = UpdateHeader(Work->HostMetadata.begin() + Work->HeaderOffset,
-	                            Work->HostMetadata.end(), Work->WorkGrpSize);
+	                            Work->HostMetadata.end(), Work->WorkGrpSize,
+	                            Work->Bucket);
 
 	// If finished
 	if (Progress == 0) {

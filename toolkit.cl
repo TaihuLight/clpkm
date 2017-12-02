@@ -154,12 +154,12 @@ ulong clock32_hi(void) {
 #endif
 void __clpkm_init_cost_ctr(uint * __cost_ctr, const uint __clpkm_tlv) {
   //* __cost_ctr = 0;
-  * __cost_ctr = clock64() + __clpkm_tlv;
+  * __cost_ctr = (uint)(clock64() >> 10);
 }
 void __clpkm_update_ctr(uint * __cost_ctr, uint __esti_cost) {
   //* __cost_ctr += __esti_cost;
 }
 bool __clpkm_should_chkpnt(uint __cost_ctr, uint __clpkm_tlv) {
   //return __cost_ctr > __clpkm_tlv;
-  return clock64() > __cost_ctr;
+  return ((uint)(clock64() >> 10) - __cost_ctr) > __clpkm_tlv;
 }

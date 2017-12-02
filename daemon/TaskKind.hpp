@@ -10,6 +10,7 @@
 #define __CLPKM__TASK_KIND_HPP__
 
 #include <cstdint>
+#include <type_traits>
 
 
 
@@ -47,17 +48,20 @@ static_assert(is_unsigned_integral_v<task_kind_base>,
               "task_kind_base is not an unsigned integral type!");
 
 // Helper function to quickly check if a number is 0
-// If the number is not 0, it returns 1, 0 otherwise
-template <class T>
-inline T IsNotZero(T Num) {
-	return ((Num | -Num) >> ((sizeof(T) << 3) - 1)) & 1;
+// If the number is not 0, it returns -1, 0 otherwise
+template <class U, class S = std::make_signed_t<U>>
+inline S IsNotZero(U UNum) {
+	S SNum = static_cast<S>(UNum);
+	return (SNum | -SNum) >> ((sizeof(S) << 3) - 1);
 	}
 
 // Assgin the bits specified by BitMask in Bitmap to 1, if Count is not 0
 template <class T>
 inline void AssignBits(task_bitmap& Bitmap, T Count, task_bitmap BitMask) {
-	task_bitmap IsCountNotZero = static_cast<task_bitmap>(IsNotZero(Count));
-	Bitmap ^= (Bitmap ^ -IsCountNotZero) & BitMask;
+	// Sign extension first
+	task_bitmap IsCountNotZero =
+			static_cast<std::make_signed_t<task_bitmap>>(IsNotZero(Count));
+	Bitmap ^= (Bitmap ^ IsCountNotZero) & BitMask;
 	}
 
 // Useful function to update task count and global bitmap
