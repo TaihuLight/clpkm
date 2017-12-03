@@ -62,18 +62,19 @@ CLPKMCC="$HOME"/CLPKM/cc/clpkmcc
 TOOLKIT="$HOME"/CLPKM/toolkit.cl
 
 # Temp files
-TMPBASE=/tmp/clpkm_drv_"$BASHPID"_"$RANDOM"
-ORIGINAL="$TMPBASE"_original.cl
-PREPROCED="$TMPBASE"_preproced.cl
-INLINED="$TMPBASE"_inlined.cl
-RENAME_LST="$TMPBASE"_rename.yaml
-RENAMED="$TMPBASE"_renamed.cl
-INSTRED="$TMPBASE"_instr.cl
-PROFLIST="$TMPBASE"_profile.yaml
-CCLOG="$TMPBASE".log
+TMPBASE=/tmp/clpkm_"$BASHPID"_"$RANDOM"
+ORIGINAL="$TMPBASE"/original.cl
+PREPROCED="$TMPBASE"/preproced.cl
+INLINED="$TMPBASE"/inlined.cl
+RENAME_LST="$TMPBASE"/rename.yaml
+RENAMED="$TMPBASE"/renamed.cl
+INSTRED="$TMPBASE"/instr.cl
+PROFLIST="$TMPBASE"/profile.yaml
+CCLOG="$TMPBASE"/log.txt
 
 # Step 0
 # Read source code from stdin
+mkdir -p "$TMPBASE"
 cat > "$ORIGINAL"
 
 print_banner 'Options' > "$CCLOG"
@@ -160,5 +161,4 @@ fi
 
 # Stage 4
 # Clean up
-rm -f "$ORIGINAL" "$INLINED" "$RENAME_LST" "$RENAMED" "$INSTRED" "$PROFLIST" \
-      "$CCLOG" "$PREPROCED"
+rm -rf "$TMPBASE"
