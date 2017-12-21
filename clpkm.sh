@@ -136,6 +136,8 @@ if [ "$(stat -c '%s' "$RENAME_LST")" -gt 0 ]; then
     dump_diag "$CCLOG"
     exit 1
   fi
+else
+  cp "$INLINED" "$RENAMED"
 fi
 
 # Step 3
