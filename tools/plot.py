@@ -15,6 +15,8 @@ def ParseBaseTimeLog(FileName):
 	List = []
 	with open(FileName) as Fin:
 		for Line in Fin:
+			if Line[0] == '#':
+				continue
 			(Time, Bench) = Line.split('\t')
 			BenchName.append(Bench.strip())
 			List.append(float(Time))
@@ -27,6 +29,8 @@ def ParseTimeLog(FileName):
 	List = []
 	with open(FileName) as Fin:
 		for Line in Fin:
+			if Line[0] == '#':
+				continue
 			(Time, Bench) = Line.split('\t')
 			List.append(float(Time))
 	return List
@@ -41,29 +45,36 @@ def NormalizeTimeList(Log, BaseLog):
 		if Log[BenchIdx] > 0:
 			Count += 1
 			GMean *= Log[BenchIdx]
-	Log.append(math.pow(GMean, 1.0 / Count))
+			sys.stdout.write(" %6.2f" % Log[BenchIdx])
+	GMean = math.pow(GMean, 1.0 / Count)
+	sys.stdout.write("; GMean: %.2f\n" % GMean)
+	Log.append(GMean)
 
 BaseTimeLog = ParseBaseTimeLog(sys.argv[1])
 TimeLog = []
 Index = numpy.arange(len(BaseTimeLog[0]))
 
-Figure = plt.figure()
+Figure = plt.figure(figsize=(27,5))
+
 Axe = Figure.add_subplot(111)
 Axe.set_xlabel("Benchmarks")
 Axe.set_ylabel("Normalized Execution Time")
+plt.yscale('log')
 
-Width = 0.25
+Width = 0.13
 AccWidth = 0
 
 Bar = ()
 BarName = ()
 
 for ArgIdx in range(2, len(sys.argv)):
+	ConfigName = os.path.basename(os.path.dirname(sys.argv[ArgIdx]))
+	sys.stdout.write("%11s |" % ConfigName)
 	NewTimeLog = ParseTimeLog(sys.argv[ArgIdx])
 	NormalizeTimeList(NewTimeLog, BaseTimeLog[1])
 	Rect = Axe.bar(Index + AccWidth, NewTimeLog, Width)
 	Bar = Bar + (Rect[0], )
-	BarName = BarName + (os.path.basename(os.path.dirname(sys.argv[ArgIdx])), )
+	BarName = BarName + (ConfigName, )
 	AccWidth += Width
 
 plt.tight_layout()
@@ -77,4 +88,4 @@ plt.legend(Bar, BarName)
 
 plt.plot()
 #plt.show()
-plt.savefig("plot.svg")
+plt.savefig("plot.pdf")
