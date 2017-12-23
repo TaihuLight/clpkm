@@ -1,0 +1,575 @@
+diff --git a/include/clang/AST/Expr.h b/include/clang/AST/Expr.h
+index f277094..f1fdc5c 100644
+--- a/include/clang/AST/Expr.h
++++ b/include/clang/AST/Expr.h
+@@ -105,6 +105,7 @@ struct SubobjectAdjustment {
+ ///
+ class Expr : public Stmt {
+   QualType TR;
++  SourceLocation SemiLoc;
+ 
+ protected:
+   Expr(StmtClass SC, QualType T, ExprValueKind VK, ExprObjectKind OK,
+@@ -139,6 +140,10 @@ public:
+     TR = t;
+   }
+ 
++  void setSemiLoc(SourceLocation SL) { SemiLoc = SL; }
++  SourceLocation getSemiLoc(void) const { return SemiLoc; }
++  SourceLocation getStmtLocEnd(void) const { return SemiLoc; }
++
+   /// isValueDependent - Determines whether this expression is
+   /// value-dependent (C++ [temp.dep.constexpr]). For example, the
+   /// array bound of "Chars" in the following example is
+diff --git a/include/clang/AST/Stmt.h b/include/clang/AST/Stmt.h
+index 6bd07af..dceea5e 100644
+--- a/include/clang/AST/Stmt.h
++++ b/include/clang/AST/Stmt.h
+@@ -388,6 +388,9 @@ public:
+   SourceLocation getLocStart() const LLVM_READONLY;
+   SourceLocation getLocEnd() const LLVM_READONLY;
+ 
++  // Similar to getLocEnd, but also includes the following semicolon.
++  SourceLocation getStmtLocEnd() const LLVM_READONLY;
++
+   // global temp stats (until we have a per-module visitor)
+   static void addStmtClass(const StmtClass s);
+   static void EnableStatistics();
+@@ -515,6 +518,7 @@ public:
+ 
+   SourceLocation getLocStart() const LLVM_READONLY { return StartLoc; }
+   SourceLocation getLocEnd() const LLVM_READONLY { return EndLoc; }
++  SourceLocation getStmtLocEnd() const LLVM_READONLY { return EndLoc; }
+ 
+   static bool classof(const Stmt *T) {
+     return T->getStmtClass() == DeclStmtClass;
+@@ -581,6 +585,7 @@ public:
+ 
+   SourceLocation getLocStart() const LLVM_READONLY { return SemiLoc; }
+   SourceLocation getLocEnd() const LLVM_READONLY { return SemiLoc; }
++  SourceLocation getStmtLocEnd() const LLVM_READONLY { return SemiLoc; }
+ 
+   static bool classof(const Stmt *T) {
+     return T->getStmtClass() == NullStmtClass;
+@@ -673,6 +678,7 @@ public:
+ 
+   SourceLocation getLocStart() const LLVM_READONLY { return LBraceLoc; }
+   SourceLocation getLocEnd() const LLVM_READONLY { return RBraceLoc; }
++  SourceLocation getStmtLocEnd() const LLVM_READONLY { return RBraceLoc; }
+ 
+   SourceLocation getLBracLoc() const { return LBraceLoc; }
+   SourceLocation getRBracLoc() const { return RBraceLoc; }
+@@ -991,6 +997,12 @@ public:
+     else
+       return SubExprs[THEN]->getLocEnd();
+   }
++  SourceLocation getStmtLocEnd() const LLVM_READONLY {
++    if (SubExprs[ELSE] != nullptr)
++      return SubExprs[ELSE]->getStmtLocEnd();
++    else
++      return SubExprs[THEN]->getStmtLocEnd();
++  }
+ 
+   // Iterators over subexpressions.  The iterators will include iterating
+   // over the initialization expression referenced by the condition variable.
+@@ -1139,6 +1151,9 @@ public:
+   SourceLocation getLocEnd() const LLVM_READONLY {
+     return SubExprs[BODY]->getLocEnd();
+   }
++  SourceLocation getStmtLocEnd() const LLVM_READONLY {
++    return SubExprs[BODY]->getStmtLocEnd();
++  }
+ 
+   static bool classof(const Stmt *T) {
+     return T->getStmtClass() == WhileStmtClass;
+@@ -1157,11 +1172,12 @@ class DoStmt : public Stmt {
+   Stmt* SubExprs[END_EXPR];
+   SourceLocation WhileLoc;
+   SourceLocation RParenLoc;  // Location of final ')' in do stmt condition.
++  SourceLocation SemiLoc;
+ 
+ public:
+   DoStmt(Stmt *body, Expr *cond, SourceLocation DL, SourceLocation WL,
+-         SourceLocation RP)
+-    : Stmt(DoStmtClass), DoLoc(DL), WhileLoc(WL), RParenLoc(RP) {
++         SourceLocation RP, SourceLocation SL = SourceLocation())
++    : Stmt(DoStmtClass), DoLoc(DL), WhileLoc(WL), RParenLoc(RP), SemiLoc(SL) {
+     SubExprs[COND] = reinterpret_cast<Stmt*>(cond);
+     SubExprs[BODY] = body;
+   }
+@@ -1184,8 +1200,12 @@ public:
+   SourceLocation getRParenLoc() const { return RParenLoc; }
+   void setRParenLoc(SourceLocation L) { RParenLoc = L; }
+ 
++  SourceLocation getSemiLoc() const { return SemiLoc; }
++  void setSemiLoc(SourceLocation L) { SemiLoc = L; }
++
+   SourceLocation getLocStart() const LLVM_READONLY { return DoLoc; }
+   SourceLocation getLocEnd() const LLVM_READONLY { return RParenLoc; }
++  SourceLocation getStmtLocEnd() const LLVM_READONLY { return SemiLoc; }
+ 
+   static bool classof(const Stmt *T) {
+     return T->getStmtClass() == DoStmtClass;
+@@ -1259,6 +1279,9 @@ public:
+   SourceLocation getLocEnd() const LLVM_READONLY {
+     return SubExprs[BODY]->getLocEnd();
+   }
++  SourceLocation getStmtLocEnd() const LLVM_READONLY {
++    return SubExprs[BODY]->getStmtLocEnd();
++  }
+ 
+   static bool classof(const Stmt *T) {
+     return T->getStmtClass() == ForStmtClass;
+@@ -1350,9 +1373,11 @@ public:
+ /// ContinueStmt - This represents a continue.
+ class ContinueStmt : public Stmt {
+   SourceLocation ContinueLoc;
++  SourceLocation SemiLoc;
+ 
+ public:
+-  ContinueStmt(SourceLocation CL) : Stmt(ContinueStmtClass), ContinueLoc(CL) {}
++  ContinueStmt(SourceLocation CL, SourceLocation SL = SourceLocation())
++  : Stmt(ContinueStmtClass), ContinueLoc(CL), SemiLoc(SL) {}
+ 
+   /// \brief Build an empty continue statement.
+   explicit ContinueStmt(EmptyShell Empty) : Stmt(ContinueStmtClass, Empty) {}
+@@ -1362,6 +1387,7 @@ public:
+ 
+   SourceLocation getLocStart() const LLVM_READONLY { return ContinueLoc; }
+   SourceLocation getLocEnd() const LLVM_READONLY { return ContinueLoc; }
++  SourceLocation getStmtLocEnd() const LLVM_READONLY { return SemiLoc; }
+ 
+   static bool classof(const Stmt *T) {
+     return T->getStmtClass() == ContinueStmtClass;
+@@ -1376,10 +1402,12 @@ public:
+ /// BreakStmt - This represents a break.
+ class BreakStmt : public Stmt {
+   SourceLocation BreakLoc;
++  SourceLocation SemiLoc;
+ 
+ public:
+-  BreakStmt(SourceLocation BL) : Stmt(BreakStmtClass), BreakLoc(BL) {
+-    static_assert(sizeof(BreakStmt) == 2 * sizeof(SourceLocation),
++  BreakStmt(SourceLocation BL, SourceLocation SL = SourceLocation())
++  : Stmt(BreakStmtClass), BreakLoc(BL), SemiLoc(SL) {
++    static_assert(sizeof(BreakStmt) > 2 * sizeof(SourceLocation),
+                   "BreakStmt too large");
+   }
+ 
+@@ -1391,6 +1419,7 @@ public:
+ 
+   SourceLocation getLocStart() const LLVM_READONLY { return BreakLoc; }
+   SourceLocation getLocEnd() const LLVM_READONLY { return BreakLoc; }
++  SourceLocation getStmtLocEnd() const LLVM_READONLY { return SemiLoc; }
+ 
+   static bool classof(const Stmt *T) {
+     return T->getStmtClass() == BreakStmtClass;
+@@ -1412,18 +1441,23 @@ public:
+ /// depend on the return type of the function and the presence of an argument.
+ class ReturnStmt : public Stmt {
+   SourceLocation RetLoc;
++  SourceLocation SemiLoc;
+   Stmt *RetExpr;
+   const VarDecl *NRVOCandidate;
+ 
+ public:
+-  explicit ReturnStmt(SourceLocation RL) : ReturnStmt(RL, nullptr, nullptr) {}
++  explicit ReturnStmt(SourceLocation RL, SourceLocation SL = SourceLocation())
++      : ReturnStmt(RL, nullptr, nullptr, SL) {}
++
+ 
+-  ReturnStmt(SourceLocation RL, Expr *E, const VarDecl *NRVOCandidate)
+-      : Stmt(ReturnStmtClass), RetLoc(RL), RetExpr((Stmt *)E),
++  ReturnStmt(SourceLocation RL, Expr *E, const VarDecl *NRVOCandidate,
++             SourceLocation SL = SourceLocation())
++      : Stmt(ReturnStmtClass), RetLoc(RL), SemiLoc(SL), RetExpr((Stmt *)E),
+         NRVOCandidate(NRVOCandidate) {}
+ 
+   /// \brief Build an empty return expression.
+-  explicit ReturnStmt(EmptyShell Empty) : Stmt(ReturnStmtClass, Empty) {}
++  explicit ReturnStmt(EmptyShell Empty, SourceLocation SL = SourceLocation())
++      : Stmt(ReturnStmtClass, Empty), SemiLoc(SL) {}
+ 
+   const Expr *getRetValue() const;
+   Expr *getRetValue();
+@@ -1445,6 +1479,9 @@ public:
+   SourceLocation getLocEnd() const LLVM_READONLY {
+     return RetExpr ? RetExpr->getLocEnd() : RetLoc;
+   }
++  SourceLocation getStmtLocEnd() const LLVM_READONLY {
++    return SemiLoc;
++  }
+ 
+   static bool classof(const Stmt *T) {
+     return T->getStmtClass() == ReturnStmtClass;
+diff --git a/include/clang/Parse/Parser.h b/include/clang/Parse/Parser.h
+index 396b5a9..d3f7226 100644
+--- a/include/clang/Parse/Parser.h
++++ b/include/clang/Parse/Parser.h
+@@ -810,14 +810,16 @@ private:
+   /// returned.
+   bool ExpectAndConsume(tok::TokenKind ExpectedTok,
+                         unsigned Diag = diag::err_expected,
+-                        StringRef DiagMsg = "");
++                        StringRef DiagMsg = "",
++                        SourceLocation* PtrLoc = nullptr);
+ 
+   /// \brief The parser expects a semicolon and, if present, will consume it.
+   ///
+   /// If the next token is not a semicolon, this emits the specified diagnostic,
+   /// or, if there's just some closing-delimiter noise (e.g., ')' or ']') prior
+   /// to the semicolon, consumes that extra token.
+-  bool ExpectAndConsumeSemi(unsigned DiagID);
++  bool ExpectAndConsumeSemi(unsigned DiagID,
++                            SourceLocation* PtrSemiLoc = nullptr);
+ 
+   /// \brief The kind of extra semi diagnostic to emit.
+   enum ExtraSemiKind {
+diff --git a/include/clang/Sema/Sema.h b/include/clang/Sema/Sema.h
+index 47cea30..44d0b71 100644
+--- a/include/clang/Sema/Sema.h
++++ b/include/clang/Sema/Sema.h
+@@ -3658,7 +3658,8 @@ public:
+     return FullExprArg(FE.get());
+   }
+ 
+-  StmtResult ActOnExprStmt(ExprResult Arg);
++  StmtResult ActOnExprStmt(ExprResult Arg,
++                           SourceLocation SemiLoc = SourceLocation());
+   StmtResult ActOnExprStmtError();
+ 
+   StmtResult ActOnNullStmt(SourceLocation SemiLoc,
+@@ -3734,7 +3735,8 @@ public:
+                             Stmt *Body);
+   StmtResult ActOnDoStmt(SourceLocation DoLoc, Stmt *Body,
+                          SourceLocation WhileLoc, SourceLocation CondLParen,
+-                         Expr *Cond, SourceLocation CondRParen);
++                         Expr *Cond, SourceLocation CondRParen,
++                         SourceLocation SemiLoc = SourceLocation());
+ 
+   StmtResult ActOnForStmt(SourceLocation ForLoc,
+                           SourceLocation LParenLoc,
+@@ -3783,8 +3785,10 @@ public:
+   StmtResult ActOnIndirectGotoStmt(SourceLocation GotoLoc,
+                                    SourceLocation StarLoc,
+                                    Expr *DestExp);
+-  StmtResult ActOnContinueStmt(SourceLocation ContinueLoc, Scope *CurScope);
+-  StmtResult ActOnBreakStmt(SourceLocation BreakLoc, Scope *CurScope);
++  StmtResult ActOnContinueStmt(SourceLocation ContinueLoc, Scope *CurScope,
++                               SourceLocation SemiLoc = SourceLocation());
++  StmtResult ActOnBreakStmt(SourceLocation BreakLoc, Scope *CurScope,
++                            SourceLocation SemiLoc = SourceLocation());
+ 
+   void ActOnCapturedRegionStart(SourceLocation Loc, Scope *CurScope,
+                                 CapturedRegionKind Kind, unsigned NumParams);
+@@ -3803,8 +3807,10 @@ public:
+                               bool AllowParamOrMoveConstructible);
+ 
+   StmtResult ActOnReturnStmt(SourceLocation ReturnLoc, Expr *RetValExp,
+-                             Scope *CurScope);
+-  StmtResult BuildReturnStmt(SourceLocation ReturnLoc, Expr *RetValExp);
++                             Scope *CurScope,
++                             SourceLocation SemiLoc = SourceLocation());
++  StmtResult BuildReturnStmt(SourceLocation ReturnLoc, Expr *RetValExp,
++                             SourceLocation SemiLoc = SourceLocation());
+   StmtResult ActOnCapScopeReturnStmt(SourceLocation ReturnLoc, Expr *RetValExp);
+ 
+   StmtResult ActOnGCCAsmStmt(SourceLocation AsmLoc, bool IsSimple,
+@@ -5248,7 +5254,8 @@ public:
+   ExprResult ActOnFinishFullExpr(Expr *Expr, SourceLocation CC,
+                                  bool DiscardedValue = false,
+                                  bool IsConstexpr = false,
+-                                 bool IsLambdaInitCaptureInitializer = false);
++                                 bool IsLambdaInitCaptureInitializer = false,
++                                 SourceLocation SemiLoc = SourceLocation());
+   StmtResult ActOnFinishFullStmt(Stmt *Stmt);
+ 
+   // Marks SS invalid if it represents an incomplete type.
+diff --git a/lib/AST/Stmt.cpp b/lib/AST/Stmt.cpp
+index 8d240c1..a5d8671 100644
+--- a/lib/AST/Stmt.cpp
++++ b/lib/AST/Stmt.cpp
+@@ -299,6 +299,22 @@ SourceLocation Stmt::getLocEnd() const {
+   llvm_unreachable("unknown statement kind");
+ }
+ 
++SourceLocation Stmt::getStmtLocEnd() const {
++  switch (getStmtClass()) {
++  case Stmt::NoStmtClass: llvm_unreachable("statement without class");
++  // I don't bother implementing all getStmtLocEnd, so I don't put the check in
++  // check_implementations
++#define ABSTRACT_STMT(type)
++#define STMT(type, base) \
++  case Stmt::type##Class: \
++    if (&Stmt::getStmtLocEnd == &type::getStmtLocEnd) \
++      llvm_unreachable(#type "::getStmtLocEnd is yet implemented"); \
++    return static_cast<const type*>(this)->getStmtLocEnd();
++#include "clang/AST/StmtNodes.inc"
++  }
++  llvm_unreachable("unknown statement kind");
++}
++
+ CompoundStmt::CompoundStmt(const ASTContext &C, ArrayRef<Stmt*> Stmts,
+                            SourceLocation LB, SourceLocation RB)
+   : Stmt(CompoundStmtClass), LBraceLoc(LB), RBraceLoc(RB) {
+diff --git a/lib/Parse/ParseStmt.cpp b/lib/Parse/ParseStmt.cpp
+index 3f25610..620bbeb 100644
+--- a/lib/Parse/ParseStmt.cpp
++++ b/lib/Parse/ParseStmt.cpp
+@@ -433,8 +433,9 @@ StmtResult Parser::ParseExprStatement() {
+   }
+ 
+   // Otherwise, eat the semicolon.
+-  ExpectAndConsumeSemi(diag::err_expected_semi_after_expr);
+-  return Actions.ActOnExprStmt(Expr);
++  SourceLocation SemiLoc;
++  ExpectAndConsumeSemi(diag::err_expected_semi_after_expr, &SemiLoc);
++  return Actions.ActOnExprStmt(Expr, SemiLoc);
+ }
+ 
+ /// ParseSEHTryBlockCommon
+@@ -1488,8 +1489,11 @@ StmtResult Parser::ParseDoStatement() {
+   if (Cond.isInvalid() || Body.isInvalid())
+     return StmtError();
+ 
++  assert(Tok.is(tok::semi));
++
+   return Actions.ActOnDoStmt(DoLoc, Body.get(), WhileLoc, T.getOpenLocation(),
+-                             Cond.get(), T.getCloseLocation());
++                             Cond.get(), T.getCloseLocation(),
++                             Tok.getLocation());
+ }
+ 
+ bool Parser::isForRangeIdentifier() {
+@@ -1869,7 +1873,8 @@ StmtResult Parser::ParseGotoStatement() {
+ ///
+ StmtResult Parser::ParseContinueStatement() {
+   SourceLocation ContinueLoc = ConsumeToken();  // eat the 'continue'.
+-  return Actions.ActOnContinueStmt(ContinueLoc, getCurScope());
++  SourceLocation SemiLoc = Tok.getLocation();
++  return Actions.ActOnContinueStmt(ContinueLoc, getCurScope(), SemiLoc);
+ }
+ 
+ /// ParseBreakStatement
+@@ -1880,7 +1885,8 @@ StmtResult Parser::ParseContinueStatement() {
+ ///
+ StmtResult Parser::ParseBreakStatement() {
+   SourceLocation BreakLoc = ConsumeToken();  // eat the 'break'.
+-  return Actions.ActOnBreakStmt(BreakLoc, getCurScope());
++  SourceLocation SemiLoc = Tok.getLocation();
++  return Actions.ActOnBreakStmt(BreakLoc, getCurScope(), SemiLoc);
+ }
+ 
+ /// ParseReturnStatement
+@@ -1918,9 +1924,13 @@ StmtResult Parser::ParseReturnStatement() {
+       return StmtError();
+     }
+   }
++
++  assert(Tok.is(tok::semi));
++  SourceLocation SemiLoc = Tok.getLocation();
++
+   if (IsCoreturn)
+     return Actions.ActOnCoreturnStmt(getCurScope(), ReturnLoc, R.get());
+-  return Actions.ActOnReturnStmt(ReturnLoc, R.get(), getCurScope());
++  return Actions.ActOnReturnStmt(ReturnLoc, R.get(), getCurScope(), SemiLoc);
+ }
+ 
+ StmtResult Parser::ParsePragmaLoopHint(StmtVector &Stmts,
+diff --git a/lib/Parse/Parser.cpp b/lib/Parse/Parser.cpp
+index 72d6537..3754277 100644
+--- a/lib/Parse/Parser.cpp
++++ b/lib/Parse/Parser.cpp
+@@ -107,8 +107,11 @@ static bool IsCommonTypo(tok::TokenKind ExpectedTok, const Token &Tok) {
+ }
+ 
+ bool Parser::ExpectAndConsume(tok::TokenKind ExpectedTok, unsigned DiagID,
+-                              StringRef Msg) {
++                              StringRef Msg, SourceLocation* PtrLoc) {
+   if (Tok.is(ExpectedTok) || Tok.is(tok::code_completion)) {
++    // Save the location of consumed token
++    if (PtrLoc != nullptr)
++      *PtrLoc = Tok.getLocation();
+     ConsumeAnyToken();
+     return false;
+   }
+@@ -152,8 +155,14 @@ bool Parser::ExpectAndConsume(tok::TokenKind ExpectedTok, unsigned DiagID,
+   return true;
+ }
+ 
+-bool Parser::ExpectAndConsumeSemi(unsigned DiagID) {
+-  if (TryConsumeToken(tok::semi))
++bool Parser::ExpectAndConsumeSemi(unsigned DiagID, SourceLocation* PtrSemiLoc) {
++  bool TryRes;
++  if (PtrSemiLoc != nullptr)
++    TryRes = TryConsumeToken(tok::semi, *PtrSemiLoc);
++  else
++    TryRes = TryConsumeToken(tok::semi);
++
++  if (TryRes)
+     return false;
+ 
+   if (Tok.is(tok::code_completion)) {
+@@ -171,7 +180,7 @@ bool Parser::ExpectAndConsumeSemi(unsigned DiagID) {
+     return false;
+   }
+   
+-  return ExpectAndConsume(tok::semi, DiagID);
++  return ExpectAndConsume(tok::semi, DiagID, "", PtrSemiLoc);
+ }
+ 
+ void Parser::ConsumeExtraSemi(ExtraSemiKind Kind, unsigned TST) {
+diff --git a/lib/Sema/SemaExprCXX.cpp b/lib/Sema/SemaExprCXX.cpp
+index 9c842de..6c79ffb 100644
+--- a/lib/Sema/SemaExprCXX.cpp
++++ b/lib/Sema/SemaExprCXX.cpp
+@@ -7524,7 +7524,8 @@ Sema::CorrectDelayedTyposInExpr(Expr *E, VarDecl *InitDecl,
+ ExprResult Sema::ActOnFinishFullExpr(Expr *FE, SourceLocation CC,
+                                      bool DiscardedValue,
+                                      bool IsConstexpr,
+-                                     bool IsLambdaInitCaptureInitializer) {
++                                     bool IsLambdaInitCaptureInitializer,
++                                     SourceLocation SemiLoc) {
+   ExprResult FullExpr = FE;
+ 
+   if (!FullExpr.get())
+@@ -7627,6 +7628,7 @@ ExprResult Sema::ActOnFinishFullExpr(Expr *FE, SourceLocation CC,
+       CurrentLSI->hasPotentialCaptures() && !FullExpr.isInvalid())
+     CheckIfAnyEnclosingLambdasMustCaptureAnyPotentialCaptures(FE, CurrentLSI,
+                                                               *this);
++  FullExpr.get()->setSemiLoc(SemiLoc);
+   return MaybeCreateExprWithCleanups(FullExpr);
+ }
+ 
+diff --git a/lib/Sema/SemaStmt.cpp b/lib/Sema/SemaStmt.cpp
+index ff0f4d9..25793e6 100644
+--- a/lib/Sema/SemaStmt.cpp
++++ b/lib/Sema/SemaStmt.cpp
+@@ -41,12 +41,15 @@
+ using namespace clang;
+ using namespace sema;
+ 
+-StmtResult Sema::ActOnExprStmt(ExprResult FE) {
++StmtResult Sema::ActOnExprStmt(ExprResult FE, SourceLocation SemiLoc) {
+   if (FE.isInvalid())
+     return StmtError();
+ 
+   FE = ActOnFinishFullExpr(FE.get(), FE.get()->getExprLoc(),
+-                           /*DiscardedValue*/ true);
++                           /*DiscardedValue*/ true,
++                           /*IsConstexpr*/ false,
++                           /*IsLambdaInitCaptureInitializer*/ false,
++                           SemiLoc);
+   if (FE.isInvalid())
+     return StmtError();
+ 
+@@ -1309,7 +1312,8 @@ StmtResult Sema::ActOnWhileStmt(SourceLocation WhileLoc, ConditionResult Cond,
+ StmtResult
+ Sema::ActOnDoStmt(SourceLocation DoLoc, Stmt *Body,
+                   SourceLocation WhileLoc, SourceLocation CondLParen,
+-                  Expr *Cond, SourceLocation CondRParen) {
++                  Expr *Cond, SourceLocation CondRParen,
++                  SourceLocation SemiLoc) {
+   assert(Cond && "ActOnDoStmt(): missing expression");
+ 
+   CheckBreakContinueBinding(Cond);
+@@ -1325,7 +1329,7 @@ Sema::ActOnDoStmt(SourceLocation DoLoc, Stmt *Body,
+ 
+   DiagnoseUnusedExprResult(Body);
+ 
+-  return new (Context) DoStmt(Body, Cond, DoLoc, WhileLoc, CondRParen);
++  return new (Context) DoStmt(Body, Cond, DoLoc, WhileLoc, CondRParen, SemiLoc);
+ }
+ 
+ namespace {
+@@ -2820,7 +2824,8 @@ static void CheckJumpOutOfSEHFinally(Sema &S, SourceLocation Loc,
+ }
+ 
+ StmtResult
+-Sema::ActOnContinueStmt(SourceLocation ContinueLoc, Scope *CurScope) {
++Sema::ActOnContinueStmt(SourceLocation ContinueLoc, Scope *CurScope,
++                        SourceLocation SemiLoc) {
+   Scope *S = CurScope->getContinueParent();
+   if (!S) {
+     // C99 6.8.6.2p1: A break shall appear only in or as a loop body.
+@@ -2828,11 +2833,12 @@ Sema::ActOnContinueStmt(SourceLocation ContinueLoc, Scope *CurScope) {
+   }
+   CheckJumpOutOfSEHFinally(*this, ContinueLoc, *S);
+ 
+-  return new (Context) ContinueStmt(ContinueLoc);
++  return new (Context) ContinueStmt(ContinueLoc, SemiLoc);
+ }
+ 
+ StmtResult
+-Sema::ActOnBreakStmt(SourceLocation BreakLoc, Scope *CurScope) {
++Sema::ActOnBreakStmt(SourceLocation BreakLoc, Scope *CurScope,
++                     SourceLocation SemiLoc) {
+   Scope *S = CurScope->getBreakParent();
+   if (!S) {
+     // C99 6.8.6.3p1: A break shall appear only in or as a switch/loop body.
+@@ -2843,7 +2849,7 @@ Sema::ActOnBreakStmt(SourceLocation BreakLoc, Scope *CurScope) {
+                      << "break");
+   CheckJumpOutOfSEHFinally(*this, BreakLoc, *S);
+ 
+-  return new (Context) BreakStmt(BreakLoc);
++  return new (Context) BreakStmt(BreakLoc, SemiLoc);
+ }
+ 
+ /// \brief Determine whether the given expression is a candidate for
+@@ -3322,8 +3328,8 @@ bool Sema::DeduceFunctionTypeFromReturnExpr(FunctionDecl *FD,
+ 
+ StmtResult
+ Sema::ActOnReturnStmt(SourceLocation ReturnLoc, Expr *RetValExp,
+-                      Scope *CurScope) {
+-  StmtResult R = BuildReturnStmt(ReturnLoc, RetValExp);
++                      Scope *CurScope, SourceLocation SemiLoc) {
++  StmtResult R = BuildReturnStmt(ReturnLoc, RetValExp, SemiLoc);
+   if (R.isInvalid() || ExprEvalContexts.back().Context ==
+                            ExpressionEvaluationContext::DiscardedStatement)
+     return R;
+@@ -3340,7 +3346,8 @@ Sema::ActOnReturnStmt(SourceLocation ReturnLoc, Expr *RetValExp,
+   return R;
+ }
+ 
+-StmtResult Sema::BuildReturnStmt(SourceLocation ReturnLoc, Expr *RetValExp) {
++StmtResult Sema::BuildReturnStmt(SourceLocation ReturnLoc, Expr *RetValExp,
++                                 SourceLocation SemiLoc) {
+   // Check for unexpanded parameter packs.
+   if (RetValExp && DiagnoseUnexpandedParameterPack(RetValExp))
+     return StmtError();
+@@ -3390,7 +3397,7 @@ StmtResult Sema::BuildReturnStmt(SourceLocation ReturnLoc, Expr *RetValExp) {
+         return StmtError();
+       RetValExp = ER.get();
+     }
+-    return new (Context) ReturnStmt(ReturnLoc, RetValExp, nullptr);
++    return new (Context) ReturnStmt(ReturnLoc, RetValExp, nullptr, SemiLoc);
+   }
+ 
+   // FIXME: Add a flag to the ScopeInfo to indicate whether we're performing
+@@ -3485,7 +3492,7 @@ StmtResult Sema::BuildReturnStmt(SourceLocation ReturnLoc, Expr *RetValExp) {
+       }
+     }
+ 
+-    Result = new (Context) ReturnStmt(ReturnLoc, RetValExp, nullptr);
++    Result = new (Context) ReturnStmt(ReturnLoc, RetValExp, nullptr, SemiLoc);
+   } else if (!RetValExp && !HasDependentReturnType) {
+     FunctionDecl *FD = getCurFunctionDecl();
+ 
+@@ -3507,7 +3514,7 @@ StmtResult Sema::BuildReturnStmt(SourceLocation ReturnLoc, Expr *RetValExp) {
+     else
+       Diag(ReturnLoc, DiagID) << getCurMethodDecl()->getDeclName() << 1/*meth*/;
+ 
+-    Result = new (Context) ReturnStmt(ReturnLoc);
++    Result = new (Context) ReturnStmt(ReturnLoc, SemiLoc);
+   } else {
+     assert(RetValExp || HasDependentReturnType);
+     const VarDecl *NRVOCandidate = nullptr;
+@@ -3560,7 +3567,7 @@ StmtResult Sema::BuildReturnStmt(SourceLocation ReturnLoc, Expr *RetValExp) {
+         return StmtError();
+       RetValExp = ER.get();
+     }
+-    Result = new (Context) ReturnStmt(ReturnLoc, RetValExp, NRVOCandidate);
++    Result = new (Context) ReturnStmt(ReturnLoc, RetValExp, NRVOCandidate, SemiLoc);
+   }
+ 
+   // If we need to check for the named return value optimization, save the

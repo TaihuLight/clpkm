@@ -435,7 +435,7 @@ auto Instrumentor::GenerateCovfefe(LiveVarTracker::liveness&& L,
 
 		switch (QT.getAddressSpace()) {
 		// clang::LangAS::Default, IIUC, private
-		case 0: {
+		case LangAS::Default: {
 				const char* VarName = VD->getIdentifier()->getNameStart();
 				size_t Size = (TI.Width + 7) / 8;
 

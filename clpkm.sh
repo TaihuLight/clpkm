@@ -48,7 +48,7 @@ function prettify_to {
 }
 
 # Clang tools
-CLANG_ROOT="$HOME"/llvm-5.0.1-rev/clang-rel
+CLANG_ROOT="$HOME"/llvm/5.0.1/clang-rel
 CLANG="$CLANG_ROOT"/bin/clang
 CLANG_FORMAT="$CLANG_ROOT"/bin/clang-format
 CLANG_RENAME="$CLANG_ROOT"/bin/clang-rename
