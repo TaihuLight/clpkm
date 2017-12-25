@@ -22,7 +22,7 @@ index f277094..f1fdc5c 100644
    /// value-dependent (C++ [temp.dep.constexpr]). For example, the
    /// array bound of "Chars" in the following example is
 diff --git a/include/clang/AST/Stmt.h b/include/clang/AST/Stmt.h
-index 6bd07af..dceea5e 100644
+index b27dbfa..accd781 100644
 --- a/include/clang/AST/Stmt.h
 +++ b/include/clang/AST/Stmt.h
 @@ -388,6 +388,9 @@ public:
@@ -51,7 +51,7 @@ index 6bd07af..dceea5e 100644
  
    static bool classof(const Stmt *T) {
      return T->getStmtClass() == NullStmtClass;
-@@ -673,6 +678,7 @@ public:
+@@ -679,6 +684,7 @@ public:
  
    SourceLocation getLocStart() const LLVM_READONLY { return LBraceLoc; }
    SourceLocation getLocEnd() const LLVM_READONLY { return RBraceLoc; }
@@ -59,7 +59,7 @@ index 6bd07af..dceea5e 100644
  
    SourceLocation getLBracLoc() const { return LBraceLoc; }
    SourceLocation getRBracLoc() const { return RBraceLoc; }
-@@ -991,6 +997,12 @@ public:
+@@ -995,6 +1001,12 @@ public:
      else
        return SubExprs[THEN]->getLocEnd();
    }
@@ -72,7 +72,7 @@ index 6bd07af..dceea5e 100644
  
    // Iterators over subexpressions.  The iterators will include iterating
    // over the initialization expression referenced by the condition variable.
-@@ -1139,6 +1151,9 @@ public:
+@@ -1143,6 +1155,9 @@ public:
    SourceLocation getLocEnd() const LLVM_READONLY {
      return SubExprs[BODY]->getLocEnd();
    }
@@ -82,7 +82,7 @@ index 6bd07af..dceea5e 100644
  
    static bool classof(const Stmt *T) {
      return T->getStmtClass() == WhileStmtClass;
-@@ -1157,11 +1172,12 @@ class DoStmt : public Stmt {
+@@ -1161,11 +1176,12 @@ class DoStmt : public Stmt {
    Stmt* SubExprs[END_EXPR];
    SourceLocation WhileLoc;
    SourceLocation RParenLoc;  // Location of final ')' in do stmt condition.
@@ -97,7 +97,7 @@ index 6bd07af..dceea5e 100644
      SubExprs[COND] = reinterpret_cast<Stmt*>(cond);
      SubExprs[BODY] = body;
    }
-@@ -1184,8 +1200,12 @@ public:
+@@ -1188,8 +1204,12 @@ public:
    SourceLocation getRParenLoc() const { return RParenLoc; }
    void setRParenLoc(SourceLocation L) { RParenLoc = L; }
  
@@ -110,7 +110,7 @@ index 6bd07af..dceea5e 100644
  
    static bool classof(const Stmt *T) {
      return T->getStmtClass() == DoStmtClass;
-@@ -1259,6 +1279,9 @@ public:
+@@ -1263,6 +1283,9 @@ public:
    SourceLocation getLocEnd() const LLVM_READONLY {
      return SubExprs[BODY]->getLocEnd();
    }
@@ -120,7 +120,7 @@ index 6bd07af..dceea5e 100644
  
    static bool classof(const Stmt *T) {
      return T->getStmtClass() == ForStmtClass;
-@@ -1350,9 +1373,11 @@ public:
+@@ -1354,9 +1377,11 @@ public:
  /// ContinueStmt - This represents a continue.
  class ContinueStmt : public Stmt {
    SourceLocation ContinueLoc;
@@ -133,7 +133,7 @@ index 6bd07af..dceea5e 100644
  
    /// \brief Build an empty continue statement.
    explicit ContinueStmt(EmptyShell Empty) : Stmt(ContinueStmtClass, Empty) {}
-@@ -1362,6 +1387,7 @@ public:
+@@ -1366,6 +1391,7 @@ public:
  
    SourceLocation getLocStart() const LLVM_READONLY { return ContinueLoc; }
    SourceLocation getLocEnd() const LLVM_READONLY { return ContinueLoc; }
@@ -141,7 +141,7 @@ index 6bd07af..dceea5e 100644
  
    static bool classof(const Stmt *T) {
      return T->getStmtClass() == ContinueStmtClass;
-@@ -1376,10 +1402,12 @@ public:
+@@ -1380,10 +1406,12 @@ public:
  /// BreakStmt - This represents a break.
  class BreakStmt : public Stmt {
    SourceLocation BreakLoc;
@@ -156,7 +156,7 @@ index 6bd07af..dceea5e 100644
                    "BreakStmt too large");
    }
  
-@@ -1391,6 +1419,7 @@ public:
+@@ -1395,6 +1423,7 @@ public:
  
    SourceLocation getLocStart() const LLVM_READONLY { return BreakLoc; }
    SourceLocation getLocEnd() const LLVM_READONLY { return BreakLoc; }
@@ -164,7 +164,7 @@ index 6bd07af..dceea5e 100644
  
    static bool classof(const Stmt *T) {
      return T->getStmtClass() == BreakStmtClass;
-@@ -1412,18 +1441,23 @@ public:
+@@ -1416,18 +1445,23 @@ public:
  /// depend on the return type of the function and the presence of an argument.
  class ReturnStmt : public Stmt {
    SourceLocation RetLoc;
@@ -192,7 +192,7 @@ index 6bd07af..dceea5e 100644
  
    const Expr *getRetValue() const;
    Expr *getRetValue();
-@@ -1445,6 +1479,9 @@ public:
+@@ -1449,6 +1483,9 @@ public:
    SourceLocation getLocEnd() const LLVM_READONLY {
      return RetExpr ? RetExpr->getLocEnd() : RetLoc;
    }
@@ -203,7 +203,7 @@ index 6bd07af..dceea5e 100644
    static bool classof(const Stmt *T) {
      return T->getStmtClass() == ReturnStmtClass;
 diff --git a/include/clang/Parse/Parser.h b/include/clang/Parse/Parser.h
-index 396b5a9..d3f7226 100644
+index 8f5b20c..927d61a 100644
 --- a/include/clang/Parse/Parser.h
 +++ b/include/clang/Parse/Parser.h
 @@ -810,14 +810,16 @@ private:
@@ -226,7 +226,7 @@ index 396b5a9..d3f7226 100644
    /// \brief The kind of extra semi diagnostic to emit.
    enum ExtraSemiKind {
 diff --git a/include/clang/Sema/Sema.h b/include/clang/Sema/Sema.h
-index 47cea30..44d0b71 100644
+index 9cbe8e5..1933fbb 100644
 --- a/include/clang/Sema/Sema.h
 +++ b/include/clang/Sema/Sema.h
 @@ -3658,7 +3658,8 @@ public:
@@ -286,7 +286,7 @@ index 47cea30..44d0b71 100644
  
    // Marks SS invalid if it represents an incomplete type.
 diff --git a/lib/AST/Stmt.cpp b/lib/AST/Stmt.cpp
-index 8d240c1..a5d8671 100644
+index 982fd45..26234d3 100644
 --- a/lib/AST/Stmt.cpp
 +++ b/lib/AST/Stmt.cpp
 @@ -299,6 +299,22 @@ SourceLocation Stmt::getLocEnd() const {
@@ -309,9 +309,9 @@ index 8d240c1..a5d8671 100644
 +  llvm_unreachable("unknown statement kind");
 +}
 +
- CompoundStmt::CompoundStmt(const ASTContext &C, ArrayRef<Stmt*> Stmts,
-                            SourceLocation LB, SourceLocation RB)
-   : Stmt(CompoundStmtClass), LBraceLoc(LB), RBraceLoc(RB) {
+ CompoundStmt::CompoundStmt(ArrayRef<Stmt *> Stmts, SourceLocation LB,
+                            SourceLocation RB)
+     : Stmt(CompoundStmtClass), LBraceLoc(LB), RBraceLoc(RB) {
 diff --git a/lib/Parse/ParseStmt.cpp b/lib/Parse/ParseStmt.cpp
 index 3f25610..620bbeb 100644
 --- a/lib/Parse/ParseStmt.cpp
@@ -420,10 +420,10 @@ index 72d6537..3754277 100644
  
  void Parser::ConsumeExtraSemi(ExtraSemiKind Kind, unsigned TST) {
 diff --git a/lib/Sema/SemaExprCXX.cpp b/lib/Sema/SemaExprCXX.cpp
-index 9c842de..6c79ffb 100644
+index cff9fbb..050afcb 100644
 --- a/lib/Sema/SemaExprCXX.cpp
 +++ b/lib/Sema/SemaExprCXX.cpp
-@@ -7524,7 +7524,8 @@ Sema::CorrectDelayedTyposInExpr(Expr *E, VarDecl *InitDecl,
+@@ -7523,7 +7523,8 @@ Sema::CorrectDelayedTyposInExpr(Expr *E, VarDecl *InitDecl,
  ExprResult Sema::ActOnFinishFullExpr(Expr *FE, SourceLocation CC,
                                       bool DiscardedValue,
                                       bool IsConstexpr,
@@ -433,7 +433,7 @@ index 9c842de..6c79ffb 100644
    ExprResult FullExpr = FE;
  
    if (!FullExpr.get())
-@@ -7627,6 +7628,7 @@ ExprResult Sema::ActOnFinishFullExpr(Expr *FE, SourceLocation CC,
+@@ -7626,6 +7627,7 @@ ExprResult Sema::ActOnFinishFullExpr(Expr *FE, SourceLocation CC,
        CurrentLSI->hasPotentialCaptures() && !FullExpr.isInvalid())
      CheckIfAnyEnclosingLambdasMustCaptureAnyPotentialCaptures(FE, CurrentLSI,
                                                                *this);
@@ -442,7 +442,7 @@ index 9c842de..6c79ffb 100644
  }
  
 diff --git a/lib/Sema/SemaStmt.cpp b/lib/Sema/SemaStmt.cpp
-index ff0f4d9..25793e6 100644
+index 4474d62..4409068 100644
 --- a/lib/Sema/SemaStmt.cpp
 +++ b/lib/Sema/SemaStmt.cpp
 @@ -41,12 +41,15 @@

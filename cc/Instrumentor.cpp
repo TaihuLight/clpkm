@@ -434,8 +434,12 @@ auto Instrumentor::GenerateCovfefe(LiveVarTracker::liveness&& L,
 		TypeInfo TI = VD->getASTContext().getTypeInfo(QT);
 
 		switch (QT.getAddressSpace()) {
+#if LLVM_VERSION_MAJOR >= 6
+		case LangAS::opencl_private: {
+#else
 		// clang::LangAS::Default, IIUC, private
 		case LangAS::Default: {
+#endif
 				const char* VarName = VD->getIdentifier()->getNameStart();
 				size_t Size = (TI.Width + 7) / 8;
 

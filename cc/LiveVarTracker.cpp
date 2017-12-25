@@ -14,7 +14,11 @@ using namespace clang;
 bool LiveVarTracker::SetContext(const Decl* D) {
 
 	this->EndContext();
+#if LLVM_VERSION_MAJOR >= 6
+	Manager = new AnalysisDeclContextManager(D->getASTContext());
+#else
 	Manager = new AnalysisDeclContextManager;
+#endif
 	Context = Manager->getContext(D);
 
 	// Or it will skil sub-exprs
