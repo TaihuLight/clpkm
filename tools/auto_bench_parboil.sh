@@ -3,20 +3,15 @@
 BENCHLIST=(
 	bfs
 	cutcp
-	histo
-	lbm
-	mri_gridding
+	# histo: ptxas error ('histo_main_kernel' uses too much shared data)
+	# lbm: contains no loop
+	# mri_gridding: -9999
 	mri_q
 	sad
 	sgemm
 	spmv
-	stencil
-	tpacf
-	)
-
-declare -A SKIP_LIST=(
-	['histo']='vanilla version use too much shared data'
-#	['sad']='sampler_t is not supported by CLPKM atm'
+	# stencil: contains no loop
+	# tpacf: sometime wrong result
 	)
 
 bfs=(
@@ -79,13 +74,11 @@ tpacf=(
 #MODE=sanity
 NRUN=5
 
-# : << DISABLE_CLPKM
-CLPKM_EXEC="env LD_PRELOAD=$HOME/CLPKM/runtime/libclpkm.so"
-CLPKM_EXEC="$CLPKM_EXEC CLPKM_PRIORITY=low CLPKM_LOGLEVEL=info"
-CLPKM_EXEC="$CLPKM_EXEC LD_LIBRARY_PATH=/usr/lib"
-CLPKM_EXEC="$CLPKM_EXEC OCL_ICD_VENDORS=nvidia.icd"
-#CLPKM_EXEC="$CLPKM_EXEC OCL_ICD_VENDORS=amdocl64.icd"
-# DISABLE_CLPKM
+CLPKM_EXEC="env LD_LIBRARY_PATH=/usr/lib OCL_ICD_VENDORS=nvidia.icd" #amdocl64.icd
+: << DISABLE_CLPKM
+CLPKM_EXEC="$CLPKM_EXEC LD_PRELOAD=$HOME/CLPKM/runtime/libclpkm.so"
+CLPKM_EXEC="$CLPKM_EXEC CLPKM_PRIORITY=low CLPKM_LOGLEVEL=debug"
+DISABLE_CLPKM
 
 OUT_DIR=./"LOG-Parboil-$(date '+%F%p%I:%M')"
 mkdir -p "$OUT_DIR"
@@ -94,11 +87,6 @@ for BENCH in "${BENCHLIST[@]}"
 do
 	for DATA in $(eval echo "\${$BENCH[@]}")
 	do
-		# Skip
-		if [[ ${SKIP_LIST[$BENCH]+F} ]]; then
-			break
-		fi
-
 		# Bash cannot handle var name with '-'
 		_BENCH=$(echo "$BENCH" | sed -r 's/_/-/g')
 
@@ -112,11 +100,12 @@ do
 
 		# Run base version
 		printf 'Running (%s, %s, base)... ' "$BENCH" "$DATA" | tee -a "$OUT_DIR"/summary.txt
+		sync; sync; sync
 
-		# Don't profile first run, or it will contain the time to build the
-		# benchmark
-		timeout 10m $CLPKM_EXEC ./parboil run "$_BENCH" "$BASE" "$DATA" \
-			> "$OUT"-base.log 2>&1
+		# Don't profile first run if it's yet built, or it will contain the time
+		# to build the benchmark
+		TOTAL_TIME1=$(TIMEFORMAT='%9R'; time ($CLPKM_EXEC ./parboil run "$_BENCH" "$BASE" "$DATA" \
+			> "$OUT"-base.log 2>&1) 2>&1)
 
 		if [ "$?" -eq 0 ]; then
 			echo 'succeed' | tee -a "$OUT_DIR"/summary.txt
@@ -128,11 +117,12 @@ do
 
 		TOTAL_TIME=$(TIMEFORMAT='%9R'; time (\
 			for ((RUN = 0; RUN < NRUN; ++RUN))
-			do 
-				timeout 10m $CLPKM_EXEC ./parboil run "$_BENCH" "$BASE" "$DATA" \
+			do
+				$CLPKM_EXEC ./parboil run "$_BENCH" "$BASE" "$DATA" \
 					> "$OUT"-base.log 2>&1
 			done) 2>&1)
-		AVE_TIME=$(echo "$TOTAL_TIME / $NRUN" | bc -l)
+		AVE_TIME=$(echo "($TOTAL_TIME)/ $NRUN" | bc -l)
+#		AVE_TIME="$TOTAL_TIME1"
 		printf "%s\t%s_(%s)\n" "$AVE_TIME" "$_BENCH" "$DATA" >> "$OUT_DIR"/time.log
 
 		# Only run smallest data on sanity mode
