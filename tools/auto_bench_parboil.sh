@@ -75,10 +75,10 @@ tpacf=(
 NRUN=5
 
 CLPKM_EXEC="env LD_LIBRARY_PATH=/usr/lib OCL_ICD_VENDORS=nvidia.icd" #amdocl64.icd
-: << DISABLE_CLPKM
+#: << DISABLE_CLPKM
 CLPKM_EXEC="$CLPKM_EXEC LD_PRELOAD=$HOME/CLPKM/runtime/libclpkm.so"
 CLPKM_EXEC="$CLPKM_EXEC CLPKM_PRIORITY=low CLPKM_LOGLEVEL=debug"
-DISABLE_CLPKM
+#DISABLE_CLPKM
 
 OUT_DIR=./"LOG-Parboil-$(date '+%F%p%I:%M')"
 mkdir -p "$OUT_DIR"
