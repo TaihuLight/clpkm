@@ -54,6 +54,8 @@ BaseTimeLog = ParseBaseTimeLog(sys.argv[1])
 TimeLog = []
 Index = numpy.arange(len(BaseTimeLog[0]))
 
+plt.rcParams.update({'font.size': 12.5})
+
 Figure = plt.figure(figsize=(27,5))
 
 Axe = Figure.add_subplot(111)
