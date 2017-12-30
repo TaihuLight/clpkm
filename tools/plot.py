@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 
+# Uncomment this for generating PDF without a X server
+#import matplotlib as mpl
+#mpl.use('Agg')
 import matplotlib.pyplot as plt
 from pprint import pprint
 import sys
