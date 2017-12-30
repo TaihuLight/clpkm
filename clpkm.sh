@@ -80,12 +80,29 @@ CCLOG="$TMPBASE"/log.txt
 mkdir -p "$TMPBASE" "$CACHE_DIR"
 cat > "$ORIGINAL"
 
+print_banner 'Options' > "$CCLOG"
+echo "'$@'" >> "$CCLOG"
+
+# Step 1
+# Preprocess and invoke OpenCL inliner
+print_banner 'Preprocess stage' >> "$CCLOG"
+
+# NOTE: Preprocess in advance here may break things!
+#       Please have a look at OpenCL 1.2 §6.10
+"$CLANG" "$ORIGINAL" -E -P -std=cl1.2 $@ 1> "$PREPROCED" 2>> "$CCLOG"
+
+# Failed
+if [ ! "$?" -eq 0 ]; then
+  dump_diag "$CCLOG"
+  exit 1
+fi
+
 # Lookup code cache
 # Don't use two SHA-512 checksum because most filesystems have a 255-byte limit
 # on filenames
 # Note: chance of collision! (very rare tho)
-SRC_HASH=$(cat "$ORIGINAL" | sha512sum | cut -d " " -f 1)
-OPT_HASH=$(echo "$@" '-I' "$PWD" | sha384sum | cut -d " " -f 1)
+SRC_HASH=$(sha512sum "$PREPROCED" | cut -d " " -f 1)
+OPT_HASH=$(echo "$@" | sha384sum | cut -d " " -f 1)
 CACHE_BASE="$CACHE_DIR"/"$SRC_HASH"-"$OPT_HASH"
 
 if [ -f "$CACHE_BASE".cl ] && [ -f "$CACHE_BASE".yaml ]; then
@@ -95,17 +112,6 @@ if [ -f "$CACHE_BASE".cl ] && [ -f "$CACHE_BASE".yaml ]; then
   exit
 fi
 
-print_banner 'Options' > "$CCLOG"
-echo "'$@'" >> "$CCLOG"
-
-# : << COMMENT_OUT_TO_ENABLE_PREPROCESS
-# Step 1
-# Preprocess and invoke OpenCL inliner
-print_banner 'Preprocess stage' >> "$CCLOG"
-
-# NOTE: Preprocess in advance here may break things!
-#       Please have a look at OpenCL 1.2 §6.10
-"$CLANG" "$ORIGINAL" -E -P -std=cl1.2 $@ 1> "$PREPROCED" 2>> "$CCLOG" && \
 prettify "$PREPROCED" && \
 "$CLANG_TIDY" "$PREPROCED" -format-style=llvm -fix \
   -checks="readability-braces-around-statements" -- -include clc/clc.h \
@@ -128,7 +134,6 @@ if [ ! "$?" -eq 0 ]; then
   dump_diag "$CCLOG"
   exit 1
 fi
-# COMMENT_OUT_TO_ENABLE_PREPROCESS
 
 # Step 2
 # Rename inlined source
