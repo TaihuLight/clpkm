@@ -61,6 +61,9 @@ RENAME_LST_GEN="$HOME"/CLPKM/rename-lst-gen/rename-lst-gen
 CLPKMCC="$HOME"/CLPKM/cc/clpkmcc
 TOOLKIT="$HOME"/CLPKM/toolkit.cl
 
+# Code cache
+CACHE_DIR=/tmp/clpkm-code-cache
+
 # Temp files
 TMPBASE=/tmp/clpkm_"$BASHPID"_"$RANDOM"
 ORIGINAL="$TMPBASE"/original.cl
@@ -74,8 +77,23 @@ CCLOG="$TMPBASE"/log.txt
 
 # Step 0
 # Read source code from stdin
-mkdir -p "$TMPBASE"
+mkdir -p "$TMPBASE" "$CACHE_DIR"
 cat > "$ORIGINAL"
+
+# Lookup code cache
+# Don't use two SHA-512 checksum because most filesystems have a 255-byte limit
+# on filenames
+# Note: chance of collision! (very rare tho)
+SRC_HASH=$(cat "$ORIGINAL" | sha512sum | cut -d " " -f 1)
+OPT_HASH=$(echo "$@" '-I' "$PWD" | sha384sum | cut -d " " -f 1)
+CACHE_BASE="$CACHE_DIR"/"$SRC_HASH"-"$OPT_HASH"
+
+if [ -f "$CACHE_BASE".cl ] && [ -f "$CACHE_BASE".yaml ]; then
+  cat "$TOOLKIT" "$CACHE_BASE".cl
+  cat "$CACHE_BASE".yaml 1>&2
+  rm -rf "$TMPBASE"
+  exit
+fi
 
 print_banner 'Options' > "$CCLOG"
 echo "'$@'" >> "$CCLOG"
@@ -87,7 +105,7 @@ print_banner 'Preprocess stage' >> "$CCLOG"
 
 # NOTE: Preprocess in advance here may break things!
 #       Please have a look at OpenCL 1.2 §6.10
-"$CLANG" "$ORIGINAL" -E -std=cl1.2 $@ 1> "$PREPROCED" 2>> "$CCLOG" && \
+"$CLANG" "$ORIGINAL" -E -P -std=cl1.2 $@ 1> "$PREPROCED" 2>> "$CCLOG" && \
 prettify "$PREPROCED" && \
 "$CLANG_TIDY" "$PREPROCED" -format-style=llvm -fix \
   -checks="readability-braces-around-statements" -- -include clc/clc.h \
@@ -156,6 +174,10 @@ if [ ! "$?" -eq 0 ]; then
 # Succeed
 else
   prettify "$INSTRED"
+
+  # Cache the result
+  cp "$INSTRED"  "$CACHE_BASE".cl
+  cp "$PROFLIST" "$CACHE_BASE".yaml
 
   cat "$TOOLKIT" "$INSTRED"
   cat "$PROFLIST" 1>&2
