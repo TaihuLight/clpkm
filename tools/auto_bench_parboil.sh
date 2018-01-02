@@ -71,6 +71,27 @@ tpacf=(
 	large
 	)
 
+function workload() {
+	trap "kill -- -$(ps -o pgid= $BASHPID | grep -o [0-9]*)" EXIT
+	while true; do
+		# Built-in $RANDOM has poor quality...
+		PICK_BENCH=$(($(od -vAn -N4 -tu4 < /dev/urandom) % ${#BENCHLIST[@]}))
+		PICK_BENCH="${BENCHLIST[$PICK_BENCH]}"
+		LAST_DATA=$(eval echo "\$\(\(\${#$PICK_BENCH[@]} - 1\)\)")
+		PICK_DATA=$(eval echo "\${$PICK_BENCH[$LAST_DATA]}")
+
+		PICK_BENCH=$(echo "$PICK_BENCH" | sed -r 's/_/-/g')
+		BASE='opencl_base'
+		if [ ! -e "./benchmarks/$PICK_BENCH/src/opencl_base" ]; then
+			BASE='opencl'
+		fi
+		#echo "$PICK_BENCH" "$BASE" "$PICK_DATA"
+		$CLPKM_EXEC ./parboil run "$PICK_BENCH" "$BASE" "$PICK_DATA" --no-check #> /dev/null 2>&1
+
+#		$CLPKM_EXEC ./parboil run bfs opencl_base SF --no-check
+	done
+	}
+
 #MODE=sanity
 NRUN=5
 
@@ -79,6 +100,20 @@ CLPKM_EXEC="env LD_LIBRARY_PATH=/usr/lib OCL_ICD_VENDORS=nvidia.icd" #amdocl64.i
 CLPKM_EXEC="$CLPKM_EXEC LD_PRELOAD=$HOME/CLPKM/runtime/libclpkm.so"
 CLPKM_EXEC="$CLPKM_EXEC CLPKM_PRIORITY=low CLPKM_LOGLEVEL=debug"
 #DISABLE_CLPKM
+
+if [ "$#" -ge 1 ]; then
+	if ! [[ "$1" =~ ^[0-9]+$ ]]; then
+		echo "'$1' is not a number"
+		exit 1
+	fi
+	trap "kill -- -$(ps -o pgid= $BASHPID | grep -o [0-9]*)" EXIT
+	for ((i = 0; i < "$1"; i++)); do
+		workload &
+		sleep 1
+	done
+	wait
+	exit
+fi
 
 OUT_DIR=./"LOG-Parboil-$(date '+%F%p%I:%M')"
 mkdir -p "$OUT_DIR"
