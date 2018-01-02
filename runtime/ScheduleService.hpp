@@ -75,7 +75,7 @@ private:
 	ScheduleService(const ScheduleService& ) = delete;
 
 	// Internal state of this process
-	bool     IsOnTerminate;
+	int      TermEventFd;
 	bool     IsOnSystemBus;
 	priority Priority;
 
@@ -93,8 +93,8 @@ private:
 			task_kind::NUM_OF_TASK_KIND);
 
 	typedef struct {
-		unsigned                Count[NumOfTaskKind] = {};
-		std::condition_variable CV;
+		unsigned Count[NumOfTaskKind] = {};
+		int      TimerFd[NumOfTaskKind] = {};
 		} high_prio_task;
 
 	typedef struct {

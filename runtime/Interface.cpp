@@ -408,10 +408,9 @@ cl_int clEnqueueNDRangeKernel(cl_command_queue Queue,
                               cl_event* Event) try {
 
 	auto& Srv = getScheduleService();
+	auto S = Srv.Schedule(task_kind::COMPUTING);
 
 	if (Srv.getPriority() != ScheduleService::priority::LOW) {
-		// Claim computing resource
-		auto S = Srv.Schedule(task_kind::COMPUTING);
 		// Prep cl_event
 		cl_event  E = NULL;
 		cl_event* PtrEv = (Event == nullptr) ? &E : Event;

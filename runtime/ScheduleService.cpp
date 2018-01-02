@@ -8,14 +8,28 @@
 #include "ErrorHandling.hpp"
 #include "ScheduleService.hpp"
 #include "LookupVendorImpl.hpp"
+
 #include <cstdlib>
 #include <cstring>
+
+#include <sys/eventfd.h>
+#include <sys/poll.h>
+#include <sys/timerfd.h>
 
 using namespace CLPKM;
 
 
 
 namespace {
+
+itimerspec GenOneTimeTimerSpec(time_t Sec, long NanoSec) {
+	itimerspec Spec;
+	Spec.it_interval.tv_sec = 0;
+	Spec.it_interval.tv_nsec = 0;
+	Spec.it_value.tv_sec = Sec;
+	Spec.it_value.tv_nsec = NanoSec;
+	return Spec;
+	}
 
 // Watcher for low priority tasks
 int RunLevelChangeWatcher(sd_bus_message* Msg, void* UserData,
@@ -94,7 +108,7 @@ void CL_CALLBACK ScheduleService::SchedGuard::SchedEndOnEventCallback(
 
 // FIXME: change defaults to system bus
 ScheduleService::ScheduleService()
-: IsOnTerminate(false), IsOnSystemBus(false), Priority(priority::LOW),
+: TermEventFd(-1), IsOnSystemBus(false), Priority(priority::LOW),
   Bus(nullptr), Threshold(0), Bitmap(0) {
 
 	if (const char* Fine = getenv("CLPKM_PRIORITY")) {
@@ -105,6 +119,9 @@ ScheduleService::ScheduleService()
 			                       Fine);
 			}
 		}
+
+	TermEventFd = eventfd(0, EFD_CLOEXEC);
+	INTER_ASSERT(TermEventFd >= 0, "eventfd failed: %s", StrError(errno).c_str());
 
 	StartBus();
 
@@ -118,17 +135,29 @@ ScheduleService::~ScheduleService() {
 
 void ScheduleService::Terminate() {
 
-	IsOnTerminate = true;
-
-	// Notify the IPC worker
-	if (auto* HighPrioTask = std::get_if<high_prio_task>(&Task))
-		HighPrioTask->CV.notify_all();
+	// Send termination
+	uint64_t Termination = 1;
+	int Ret = write(TermEventFd, &Termination, sizeof(Termination));
+	INTER_ASSERT(Ret > 0, "write to eventfd failed: %s", StrError(errno).c_str());
 
 	if (IPCWorker.joinable())
 		IPCWorker.join();
 
-	// Clean up and reset to NULL
+	// Clean up bus and reset to NULL
 	Bus = sd_bus_flush_close_unref(Bus);
+
+	// Release timers and and set to -1
+	if (auto* HighPrioTask = std::get_if<high_prio_task>(&Task)) {
+		int* TimerFd = HighPrioTask->TimerFd;
+		for (size_t Kind = 0; Kind < NumOfTaskKind; ++Kind) {
+			close(TimerFd[Kind]);
+			TimerFd[Kind] = -1;
+			}
+		}
+
+	// Release termination event
+	close(TermEventFd);
+	TermEventFd = -1;
 
 	}
 
@@ -146,9 +175,20 @@ void ScheduleService::StartBus() {
 
 	// Only low priority tasks need to get config
 	if (Priority != priority::LOW) {
-		Task.emplace<high_prio_task>();
+
+		auto& TaskData = Task.emplace<high_prio_task>();
+
+		// Create timers for each task kind to notify the worker
+		for (size_t Kind = 0; Kind < NumOfTaskKind; ++Kind) {
+			int TimerFd = timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK | TFD_CLOEXEC);
+			INTER_ASSERT(TimerFd >= 0, "timerfd_create failed: %s",
+			             StrError(errno).c_str());
+			TaskData.TimerFd[Kind] = TimerFd;
+			}
+
 		IPCWorker = std::thread(&ScheduleService::HighPrioProcWorker, this);
 		return;
+
 		}
 
 	Ret = sd_bus_add_match(
@@ -212,55 +252,58 @@ void ScheduleService::SchedStart(task_kind K) {
 	size_t Kind = static_cast<size_t>(K);
 	task_bitmap Mask = static_cast<task_bitmap>(1) << Kind;
 
-	if (Priority == priority::HIGH) {
-
-		auto* HighPrioTask = std::get_if<high_prio_task>(&Task);
-		std::unique_lock<std::mutex> Lock(Mutex);
-
-		unsigned OldCount = HighPrioTask->Count[Kind]++;
-		AssignBits(Bitmap, 1, Mask);
-
-		Lock.unlock();
-
-		// Notify the worker that the bit is no longer 0
-		if (!OldCount)
-			HighPrioTask->CV.notify_one();
-
-		return;
-
-		}
-
-	// Low priority task starts here
-	auto* LowPrioTask = std::get_if<low_prio_task>(&Task);
 	std::unique_lock<std::mutex> Lock(Mutex);
 
-	// Wait until corresponding bit becomes 0
-	LowPrioTask->CV[Kind].wait(Lock, [&]() -> bool {
-		return Mask & ~Bitmap;
-		});
+	// Low priority processes wait until corresponding bit becomes 0
+	if (auto* LowPrioTask = std::get_if<low_prio_task>(&Task)) {
+		LowPrioTask->CV[Kind].wait(Lock, [&]() -> bool {
+			return Mask & ~Bitmap;
+			});
+		return;
+		}
+
+	// High priority task starts here
+	auto* HighPrioTask = std::get_if<high_prio_task>(&Task);
+
+	// Update task count and global bitmap
+	unsigned OldCount = HighPrioTask->Count[Kind]++;
+	AssignBits(Bitmap, 1, Mask);
+
+	// Notify the worker that the bit is no longer 0
+	if (!OldCount) {
+		itimerspec OneNanoSec = GenOneTimeTimerSpec(0, 1);
+		int Ret = timerfd_settime(HighPrioTask->TimerFd[Kind], 0, &OneNanoSec,
+		                          nullptr);
+		INTER_ASSERT(Ret == 0, "timerfd_settime failed: %s",
+		             StrError(errno).c_str());
+		}
 
 	}
 
 void ScheduleService::SchedEnd(task_kind K) {
 
-	if (Priority == priority::LOW)
+	auto* HighPrioTask = std::get_if<high_prio_task>(&Task);
+
+	if (!HighPrioTask)
 		return;
 
 	size_t Kind = static_cast<size_t>(K);
 	task_bitmap Mask = static_cast<task_bitmap>(1) << Kind;
 
-	auto* HighPrioTask = std::get_if<high_prio_task>(&Task);
 	std::unique_lock<std::mutex> Lock(Mutex);
 
 	// Update task count and global bitmap
 	unsigned NewCount = --HighPrioTask->Count[Kind];
 	AssignBits(Bitmap, NewCount, Mask);
 
-	Lock.unlock();
-
-	// Notify the worker if it became 0 again
-	if (!NewCount)
-		HighPrioTask->CV.notify_one();
+	// Reserve the resource for a while
+	// Notify the worker if nobody reset the timer in time
+	if (!NewCount) {
+		itimerspec OneSec = GenOneTimeTimerSpec(1, 0);
+		int Ret = timerfd_settime(HighPrioTask->TimerFd[Kind], 0, &OneSec, nullptr);
+		INTER_ASSERT(Ret == 0, "timerfd_settime failed: %s",
+		             StrError(errno).c_str());
+		}
 
 	}
 
@@ -270,37 +313,73 @@ void ScheduleService::SchedEnd(task_kind K) {
 void ScheduleService::HighPrioProcWorker() {
 
 	auto* HighPrioTask = std::get_if<high_prio_task>(&Task);
-	INTER_ASSERT(HighPrioTask != nullptr, "Task is not a high_prio_task!");
+	INTER_ASSERT(HighPrioTask, "Task is not a high_prio_task!");
 
 	// The task bitmap bitmap of every high priority process is initially 0 from
 	// the perspective of the schedule service
 	task_bitmap OldBitmap = 0;
 
-	while (!IsOnTerminate) {
+	// The last one is for termination event
+	pollfd PollFd[NumOfTaskKind + 1] = {};
+
+	for (size_t Kind = 0; Kind < NumOfTaskKind; ++Kind) {
+		PollFd[Kind].fd = HighPrioTask->TimerFd[Kind];
+		PollFd[Kind].events = POLLIN;
+		}
+
+	PollFd[NumOfTaskKind].fd = TermEventFd;
+	PollFd[NumOfTaskKind].events = POLLIN;
+
+	while (true) {
+
+		while (ppoll(PollFd, NumOfTaskKind + 1, nullptr, nullptr) < 0)
+			INTER_ASSERT(errno == EINTR, "ppoll failed: %s", StrError(errno).c_str());
+
+		// If the ppoll is triggered by termination event or something go wrong
+		constexpr auto TermCondMask = POLLIN | POLLERR | POLLHUP | POLLNVAL;
+		if (PollFd[NumOfTaskKind].revents & TermCondMask)
+			return;
 
 		std::unique_lock<std::mutex> Lock(Mutex);
 
-		// Wait until the termination of this process, or the run level had
-		// changed
-		HighPrioTask->CV.wait(Lock, [&]() -> bool {
-			return (OldBitmap != Bitmap) || IsOnTerminate;
-			});
+		// 1's bits in the map are those changed from 1 to 0
+		task_bitmap ClearedBitmap =
+				OldBitmap & (Bitmap ^ static_cast<task_bitmap>(-1));
+		task_bitmap Mask = 1;
 
-		// If we got here due to IsOnTerminate
-		if (IsOnTerminate)
-			return;
+		// Not every bit needs to be updated immediately
+		// This record what needs to be updated
+		task_bitmap MapToSet = Bitmap;
 
+		for (size_t Kind = 0; Kind < NumOfTaskKind; ++Kind, Mask <<= 1) {
+			uint64_t Temp;
+			// If the timer has gone off, stage the change
+			if (read(HighPrioTask->TimerFd[Kind], &Temp, sizeof(Temp)) >= 0)
+				continue;
+			INTER_ASSERT(errno == EAGAIN, "failed to read timerfd: %s",
+			             StrError(errno).c_str());
+			// If it's cleared in this iteration
+			if (ClearedBitmap & Mask)
+				MapToSet ^= Mask;
+			}
+
+		if (MapToSet == OldBitmap)
+			continue;
+
+		OldBitmap = MapToSet;
+		Lock.unlock();
+
+		// Now tell the daemon to update the change
 		sd_bus_error    BusError = SD_BUS_ERROR_NULL;
 		sd_bus_message* Msg = nullptr;
 
-		// Note: bool is promoted to int here, no need to worry about the width
 		int Ret = sd_bus_call_method(
 				Bus,
 				"edu.nctu.sslab.CLPKMSchedSrv",  // service
 				"/edu/nctu/sslab/CLPKMSchedSrv", // object path
 				"edu.nctu.sslab.CLPKMSchedSrv",  // interface
 				"SetHighPrioTaskBitmap",         // method name
-				&BusError, &Msg, TASK_BITMAP_DBUS_TYPE_CODE, OldBitmap = Bitmap);
+				&BusError, &Msg, TASK_BITMAP_DBUS_TYPE_CODE, MapToSet);
 		INTER_ASSERT(Ret >= 0, "call method failed: %s", StrError(-Ret).c_str());
 
 		unsigned IsGranted = 0;
@@ -324,30 +403,21 @@ void ScheduleService::HighPrioProcWorker() {
 void ScheduleService::LowPrioProcWorker() {
 
 	auto* LowPrioTask = std::get_if<low_prio_task>(&Task);
-	INTER_ASSERT(LowPrioTask != nullptr, "Task is not a low_prio_task!");
+	INTER_ASSERT(LowPrioTask, "Task is not a low_prio_task!");
 
 	// Start from the RunLevel set by the initial call to GetConfig
 	task_bitmap OldBitmap = Bitmap;
-	uint64_t Timeout = 0;
 
-	{
-		int Ret = sd_bus_get_timeout(Bus, &Timeout);
-		INTER_ASSERT(Ret >= 0, "failed to get bus timeout", StrError(-Ret).c_str());
+	// The first is for sd-bus, and the last is for termination event
+	pollfd PollFd[2] = {};
 
-		// 0.1s shall be enough
-		if (!Timeout)
-			Timeout = 100000;
-
-		getRuntimeKeeper().Log(
-				RuntimeKeeper::loglevel::INFO,
-				"==CLPKM== Timeout of sd_bus_wait is set to %" PRIu64 " us\n",
-				Timeout);
-
-		}
+	constexpr auto TermCondMask = POLLIN | POLLERR | POLLHUP | POLLNVAL;
+	PollFd[1].fd = TermEventFd;
+	PollFd[1].events = POLLIN;
 
 	std::unique_lock<std::mutex> Lock(Mutex);
 
-	while (!IsOnTerminate) {
+	while (!(PollFd[1].revents & TermCondMask)) {
 
 		// This may change RunLevel
 		int Ret = sd_bus_process(Bus, nullptr);
@@ -358,6 +428,9 @@ void ScheduleService::LowPrioProcWorker() {
 
 		// If we reach here, Ret is 0
 		// No more stuff to process at the moment
+		getRuntimeKeeper().Log(
+				RuntimeKeeper::loglevel::DEBUG,
+				"==CLPKM== Run level changed to %d\n", Bitmap);
 
 		// 1's bits in the map are those changed from 1 to 0
 		task_bitmap ClearedBitmap =
@@ -374,12 +447,15 @@ void ScheduleService::LowPrioProcWorker() {
 			Mask <<= 1;
 			}
 
-		// sd_bus_wait can only return on signal or timeout
-		// We are running as a library, messing around signal seems not a good
-		// idea
-		Ret = sd_bus_wait(Bus, Timeout);
-		INTER_ASSERT(Ret >= 0 || Ret == -EINTR,
-		             "failed to wait on bus: %s", StrError(-Ret).c_str());
+		// These values may change, fetch fresh values right before ppoll
+		Ret = PollFd[0].fd = sd_bus_get_fd(Bus);
+		INTER_ASSERT(Ret >= 0, "sd_bus_get_fd failed: %s", StrError(-Ret).c_str());
+		Ret = PollFd[0].events = sd_bus_get_events(Bus);
+		INTER_ASSERT(Ret >= 0, "sd_bus_get_events failed: %s",
+		             StrError(-Ret).c_str());
+
+		while (ppoll(PollFd, 2, nullptr, nullptr) < 0)
+			INTER_ASSERT(errno == EINTR, "ppoll failed: %s", StrError(errno).c_str());
 
 		Lock.lock();
 
