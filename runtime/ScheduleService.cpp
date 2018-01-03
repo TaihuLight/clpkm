@@ -351,16 +351,24 @@ void ScheduleService::HighPrioProcWorker() {
 		// This record what needs to be updated
 		task_bitmap MapToSet = Bitmap;
 
-		for (size_t Kind = 0; Kind < NumOfTaskKind; ++Kind, Mask <<= 1) {
-			uint64_t Temp;
-			// If the timer has gone off, stage the change
-			if (read(HighPrioTask->TimerFd[Kind], &Temp, sizeof(Temp)) >= 0)
-				continue;
-			INTER_ASSERT(errno == EAGAIN, "failed to read timerfd: %s",
-			             StrError(errno).c_str());
-			// If it's cleared in this iteration
-			if (ClearedBitmap & Mask)
+		for (size_t Kind = 0; Kind < NumOfTaskKind; ++Kind) {
+			// Make sure nobody is fucking around
+			auto RetEvent = PollFd[Kind].revents;
+			INTER_ASSERT(!(RetEvent & (POLLERR | POLLHUP | POLLNVAL)),
+			             "timerfd revents: %d", RetEvent);
+			// Stage the change of those timer has gone off
+			if (RetEvent & POLLIN) {
+				uint64_t Temp;
+				// Consume the data so that it won't wake up ppoll again
+				int Ret = read(HighPrioTask->TimerFd[Kind], &Temp, sizeof(Temp));
+				INTER_ASSERT(Ret > 0, "failed to read timerfd: %s",
+				             StrError(errno).c_str());
+				}
+			// If it's cleared in this iteration, and the timer has yet gone off,
+			// revert the change
+			else if (ClearedBitmap & Mask)
 				MapToSet ^= Mask;
+			Mask <<= 1;
 			}
 
 		if (MapToSet == OldBitmap)
