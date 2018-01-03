@@ -338,7 +338,7 @@ void ScheduleService::HighPrioProcWorker() {
 		// If the ppoll is triggered by termination event or something go wrong
 		constexpr auto TermCondMask = POLLIN | POLLERR | POLLHUP | POLLNVAL;
 		if (PollFd[NumOfTaskKind].revents & TermCondMask)
-			return;
+			break;
 
 		std::unique_lock<std::mutex> Lock(Mutex);
 
@@ -406,6 +406,10 @@ void ScheduleService::HighPrioProcWorker() {
 
 		}
 
+	INTER_ASSERT(
+			!(PollFd[NumOfTaskKind].revents & (POLLERR | POLLHUP | POLLNVAL)),
+			"eventfd revents: %d", PollFd[NumOfTaskKind].revents);
+
 	}
 
 void ScheduleService::LowPrioProcWorker() {
@@ -468,6 +472,9 @@ void ScheduleService::LowPrioProcWorker() {
 		Lock.lock();
 
 		}
+
+	INTER_ASSERT(!(PollFd[1].revents & (POLLERR | POLLHUP | POLLNVAL)),
+	             "eventfd revents: %d", PollFd[1].revents);
 
 	}
 
