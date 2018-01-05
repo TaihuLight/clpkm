@@ -92,5 +92,8 @@ plt.legend(Bar, BarName)
 #sys.exit(":)")
 
 plt.plot()
+Axe.set_axisbelow(True)
+Axe.grid('on', ls=':')
+
 #plt.show()
 plt.savefig("plot.pdf")
