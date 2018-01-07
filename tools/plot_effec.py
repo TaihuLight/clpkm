@@ -78,6 +78,7 @@ Axe.legend(loc=2)
 plt.tight_layout()
 
 plt.plot()
+Axe.set_xlim(xmin=0)
 Axe.set_ylim(ymin=0)
 Axe.grid('on', ls=':')
 
