@@ -84,7 +84,7 @@ print_banner 'Options' > "$CCLOG"
 echo "'$@'" >> "$CCLOG"
 
 # Step 1
-# Preprocess and invoke OpenCL inliner
+# Macro expansion
 print_banner 'Preprocess stage' >> "$CCLOG"
 
 # NOTE: Preprocess in advance here may break things!
@@ -123,23 +123,11 @@ if [ ! "$?" -eq 0 ]; then
   exit 1
 fi
 
-print_banner 'Inline stage' >> "$CCLOG"
-
-"$CLINLINER" "$PREPROCED" \
-  -- -include clc/clc.h -std=cl1.2 $@ \
-  1> "$INLINED" 2>> "$CCLOG"
-
-# Failed
-if [ ! "$?" -eq 0 ]; then
-  dump_diag "$CCLOG"
-  exit 1
-fi
-
 # Step 2
-# Rename inlined source
+# Renaming
 print_banner 'Rename stage' >> "$CCLOG"
 
-"$RENAME_LST_GEN" "$INLINED" \
+"$RENAME_LST_GEN" "$PREPROCED" \
   -- -include clc/clc.h -std=cl1.2 $@ \
   1> "$RENAME_LST" 2>> "$CCLOG"
 
@@ -151,7 +139,7 @@ fi
 
 # Don't do shit if it gens nothin'
 if [ "$(stat -c '%s' "$RENAME_LST")" -gt 0 ]; then
-  "$CLANG_RENAME" -input "$RENAME_LST" "$INLINED" \
+  "$CLANG_RENAME" -input "$RENAME_LST" "$PREPROCED" \
     -- -include clc/clc.h -std=cl1.2 $@ \
     1> "$RENAMED" 2>> "$CCLOG"
   # Failed
@@ -160,14 +148,28 @@ if [ "$(stat -c '%s' "$RENAME_LST")" -gt 0 ]; then
     exit 1
   fi
 else
-  cp "$INLINED" "$RENAMED"
+  cp "$PREPROCED" "$RENAMED"
 fi
 
 # Step 3
+# Inlining
+print_banner 'Inline stage' >> "$CCLOG"
+
+"$CLINLINER" "$RENAMED" \
+  -- -include clc/clc.h -std=cl1.2 $@ \
+  1> "$INLINED" 2>> "$CCLOG"
+
+# Failed
+if [ ! "$?" -eq 0 ]; then
+  dump_diag "$CCLOG"
+  exit 1
+fi
+
+# Step 4
 # Invoke CLPKMCC
 print_banner 'Instrument stage' >> "$CCLOG"
 
-"$CLPKMCC" "$RENAMED" \
+"$CLPKMCC" "$INLINED" \
   --source-output="$INSTRED" --profile-output="$PROFLIST" \
   -- -include clc/clc.h -std=cl1.2 $@ \
   1> /dev/null 2>> "$CCLOG"
