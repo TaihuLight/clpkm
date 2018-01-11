@@ -66,13 +66,13 @@ Axe.set_ylabel("Normalized Execution Time")
 
 #XNew = numpy.linspace(BaseTimeLog[0][0], BaseTimeLog[0][-1], 300)
 #YNew = spline(BaseTimeLog[0], BaseTimeLog[1], XNew)
-plt.plot(BaseTimeLog[0], BaseTimeLog[1], marker='o', label='Base')
+plt.plot(BaseTimeLog[0], BaseTimeLog[1], marker='o', label='Base', linewidth=2.5)
 
 for ArgIdx in range(2, len(sys.argv)):
 	ConfigName = os.path.splitext(os.path.basename(sys.argv[ArgIdx]))[0]
 	sys.stdout.write("%11s |" % ConfigName)
 	NewTimeLog = ParseTimeLog(sys.argv[ArgIdx], BaseTimeLog[2])
-	plt.plot(BaseTimeLog[0], NewTimeLog, label=ConfigName, marker='x')
+	plt.plot(BaseTimeLog[0], NewTimeLog, label=ConfigName, marker='x', linewidth=2.5)
 
 Axe.legend(loc=2)
 plt.tight_layout()
