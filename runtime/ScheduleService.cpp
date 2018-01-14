@@ -43,11 +43,6 @@ int RunLevelChangeWatcher(sd_bus_message* Msg, void* UserData,
 	INTER_ASSERT(Ret >= 0,
 	             "failed to read message from bus: %s", StrError(-Ret).c_str());
 
-	getRuntimeKeeper().Log(
-			RuntimeKeeper::loglevel::INFO,
-			"==CLPKM== Run level changed to %" TASK_BITMAP_PRINTF_SPECIFIER "\n",
-			Bitmap);
-
 	return 1;
 
 	}
@@ -443,8 +438,9 @@ void ScheduleService::LowPrioProcWorker() {
 		// If we reach here, Ret is 0
 		// No more stuff to process at the moment
 		getRuntimeKeeper().Log(
-				RuntimeKeeper::loglevel::DEBUG,
-				"==CLPKM== Run level changed to %d\n", Bitmap);
+				RuntimeKeeper::loglevel::INFO,
+				"==CLPKM== Run level changed to %" TASK_BITMAP_PRINTF_SPECIFIER "\n",
+				Bitmap);
 
 		// 1's bits in the map are those changed from 1 to 0
 		task_bitmap ClearedBitmap =
