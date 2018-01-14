@@ -1,6 +1,7 @@
 #!/bin/bash
 
 if [ ! "$#" -eq 2 ]; then
+	echo 'Generate control flow graph PNG from PTX file (via clGetProgramInfo)'
 	echo 'Usage:'
 	echo "  '$0' <input-ptx.s> <output.png>"
 	exit 1
@@ -23,4 +24,4 @@ sed -i 's/fontname=\"Courier\",fontsize=10/fontname=\"Monaco\",fontsize=18/g' "$
 dot -o"$2" -Tpng < "$TMPDOT"
 
 # Clean up
-rm "$TMPVER" "$TMPBIN" # "$TMPDOT"
+rm "$TMPVER" "$TMPBIN" "$TMPDOT"

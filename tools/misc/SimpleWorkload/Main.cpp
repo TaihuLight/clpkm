@@ -1,3 +1,14 @@
+/*
+  Simple workload generator, a simple tool to debug or profile CLPKM
+
+  E.g. use GDB to run this tool with CLPKM:
+
+  $ CLPKM_PRIORITY=low CLPKM_LOGLEVEL=debug \
+    LD_PRELOAD=$HOME/CLPKM/runtime/libclpkm.so \
+    gdb --tui --args ./SimpleWorkload Kernel.cl Workload 1000000000
+
+*/
+
 #define CL_USE_DEPRECATED_OPENCL_1_2_APIS
 
 #include <iostream>
