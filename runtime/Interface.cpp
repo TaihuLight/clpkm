@@ -514,19 +514,26 @@ cl_int clEnqueueNDRangeKernel(cl_command_queue Queue,
 		TotalReqLocSize += KernelInfo.Args[ParamIdx].first;
 
 	size_t MetadataSize = (NumOfDynLocParam + NumOfThread) * sizeof(cl_int);
+	size_t PrivateBufferSize = Profile.ReqPrvSize * NumOfThread;
+	size_t LocalBufferSize = TotalReqLocSize * NumOfWorkGrp;
 
-	RT.Log(RuntimeKeeper::loglevel::INFO,
-	       "\n==CLPKM== Enqueue kernel %p (%s, %s)\n"
-	       "==CLPKM==   metadata:  %s [4 Bytes x (%zu DSLB + %zu work-items)]\n"
-	       "==CLPKM==   __private: %s [%zu Bytes x %zu work-items]\n"
-	       "==CLPKM==   __local:   %s [%zu Bytes x %zu work-groups]\n",
-	       Kernel, Profile.Name.c_str(), (PoolSize > 0) ? "pooled" : "new",
-	       ToHumanReadable(MetadataSize).c_str(),
-	       NumOfDynLocParam, NumOfThread,
-	       ToHumanReadable(Profile.ReqPrvSize * NumOfThread).c_str(),
-	       Profile.ReqPrvSize, NumOfThread,
-	       ToHumanReadable(TotalReqLocSize * NumOfWorkGrp).c_str(),
-	       TotalReqLocSize, NumOfWorkGrp);
+	if (RT.shouldLog(RuntimeKeeper::loglevel::INFO)) {
+		size_t AdditionallyRequired = MetadataSize + PrivateBufferSize
+		                              + LocalBufferSize;
+		RT.Log("\n==CLPKM== Enqueue kernel %p (%s, %s)\n"
+		       "==CLPKM==   metadata:  %s [4 Bytes x (%zu DSLB + %zu work-items)]\n"
+		       "==CLPKM==   __private: %s [%zu Bytes x %zu work-items]\n"
+		       "==CLPKM==   __local:   %s [%zu Bytes x %zu work-groups]\n"
+		       "==CLPKM== Additionally required: %s (%zu) in total\n",
+		       Kernel, Profile.Name.c_str(), (PoolSize > 0) ? "pooled" : "new",
+		       ToHumanReadable(MetadataSize).c_str(),
+		       NumOfDynLocParam, NumOfThread,
+		       ToHumanReadable(PrivateBufferSize).c_str(),
+		       Profile.ReqPrvSize, NumOfThread,
+		       ToHumanReadable(LocalBufferSize).c_str(),
+		       TotalReqLocSize, NumOfWorkGrp,
+		       ToHumanReadable(AdditionallyRequired).c_str(), AdditionallyRequired);
+		}
 
 	// Step 2
 	// Prepare header and live value buffers
@@ -538,17 +545,17 @@ cl_int clEnqueueNDRangeKernel(cl_command_queue Queue,
 	OCL_ASSERT(Ret);
 
 	clMemObj LocalBuffer = clMemObj(
-			TotalReqLocSize
+			LocalBufferSize > 0
 			? venCreateBuffer(QueueInfo.Context, CL_MEM_READ_WRITE,
-			                  TotalReqLocSize * NumOfWorkGrp,
+			                  LocalBufferSize,
 			                  nullptr, &Ret)
 			: NULL);
 	OCL_ASSERT(Ret);
 
 	clMemObj PrivateBuffer = clMemObj(
-			Profile.ReqPrvSize > 0
+			PrivateBufferSize > 0
 			? venCreateBuffer(QueueInfo.Context, CL_MEM_READ_WRITE,
-			                  Profile.ReqPrvSize * NumOfThread,
+			                  PrivateBufferSize,
 			                  nullptr, &Ret)
 			: NULL);
 	OCL_ASSERT(Ret);

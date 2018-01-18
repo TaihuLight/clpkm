@@ -15,19 +15,21 @@ using namespace CLPKM;
 
 
 std::string CLPKM::ToHumanReadable(size_t S) {
-		float  R = S;
-		size_t U = 0;
 
-		const char* UntTbl[] = {" B", " KiB", " MiB", "GiB", "TiB"};
-		constexpr size_t UntTblSize = sizeof(UntTbl) / sizeof(char*);
+	float  R = S;
+	size_t U = 0;
 
-		while (R > 1024 && U < UntTblSize) {
-			R /= 1024.0f;
-			U++;
-			}
+	const char* UntTbl[] = {" B", " KiB", " MiB", "GiB", "TiB"};
+	constexpr size_t UntTblSize = sizeof(UntTbl) / sizeof(char*);
 
-		return std::to_string(R) + UntTbl[U];
+	while (R > 1024.0f && U < UntTblSize) {
+		R /= 1024.0f;
+		U++;
 		}
+
+	return std::to_string(R) + UntTbl[U];
+
+	}
 
 std::vector<size_t> CLPKM::FindWorkGroupSize(cl_kernel Kernel,
                                              cl_device_id Device,
