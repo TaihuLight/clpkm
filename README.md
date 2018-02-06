@@ -117,7 +117,7 @@ Run a application as high priority task:
 
 	$ env CLPKM_PRIORITY=high LD_PRELOAD="$CLPKM_SRC_DIR"/runtime/libclpkm.so <command-to-run-ocl-app>
 
-The runtime connects to user bus by default. You can make it connect to the system bus by passing `CLPKM\_BUS\_TYPE=system` along with other environment variables.
+The runtime connects to user bus by default. You can make it connect to the system bus by passing `CLPKM_BUS_TYPE=system` along with other environment variables.
 
 Benchmark
 ====================
