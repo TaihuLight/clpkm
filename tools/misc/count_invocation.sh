@@ -7,7 +7,7 @@ if [ "$#" -ne 1 ]; then
 	exit
 fi
 
-NUM_CALL=$(grep 'run #1$' "$1" | wc -l)
-NUM_RUN=$(grep 'run #' "$1" | wc -l)
+NUM_CALL=$(grep -c 'run #1$' "$1")
+NUM_RUN=$(grep -c 'run #' "$1")
 
 printf "%s:\t$NUM_CALL -> $NUM_RUN\n" "$1"
