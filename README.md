@@ -107,6 +107,8 @@ Start the daemon first, for example run it on the terminal, user bus:
 
 	$ "$CLPKM_SRC_DIR"/clpkm-daemon terminal user "$CLPKM_SRC_DIR"/clpkm.conf
 
+(Note: It's quite likely that you need special configuration to make the daemon run on the system bus. You may want to check out /etc/dbus-1/system.d/avahi-dbus.conf.)
+
 Run a OpenCL application as a low priority process, with diagnostic output enabled:
 
 	$ env CLPKM_PRIORITY=low CLPKM_LOGLEVEL=debug LD_PRELOAD="$CLPKM_SRC_DIR"/runtime/libclpkm.so <command-to-run-ocl-app>
@@ -114,6 +116,8 @@ Run a OpenCL application as a low priority process, with diagnostic output enabl
 Run a application as high priority task:
 
 	$ env CLPKM_PRIORITY=high LD_PRELOAD="$CLPKM_SRC_DIR"/runtime/libclpkm.so <command-to-run-ocl-app>
+
+The runtime connects to user bus by default. You can make it connect to the system bus by passing `CLPKM\_BUS\_TYPE=system` along with other environment variables.
 
 Benchmark
 ====================

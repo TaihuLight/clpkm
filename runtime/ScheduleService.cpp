@@ -106,13 +106,20 @@ ScheduleService::ScheduleService()
 : TermEventFd(-1), IsOnSystemBus(false), Priority(priority::LOW),
   Bus(nullptr), Threshold(0), Bitmap(0) {
 
+	auto& RT = getRuntimeKeeper();
+
 	if (const char* Fine = getenv("CLPKM_PRIORITY")) {
 		if (!strcmp(Fine, "high"))
 			Priority = priority::HIGH;
-		else if (strcmp(Fine, "low")) {
-			getRuntimeKeeper().Log("==CLPKM== Unrecognised priority: \"%s\"\n",
-			                       Fine);
-			}
+		else if (strcmp(Fine, "low"))
+			RT.Log("==CLPKM== Unrecognised priority: \"%s\"\n", Fine);
+		}
+
+	if (const char* BusType = getenv("CLPKM_BUS_TYPE")) {
+		if (!strcmp(BusType, "system"))
+			IsOnSystemBus = true;
+		else if (strcmp(BusType, "user"))
+			RT.Log("==CLPKM== Unrecognised bus type: \"%s\"\n", BusType);
 		}
 
 	TermEventFd = eventfd(0, EFD_CLOEXEC);
