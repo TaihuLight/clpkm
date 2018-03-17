@@ -203,7 +203,7 @@ index b27dbfa..accd781 100644
    static bool classof(const Stmt *T) {
      return T->getStmtClass() == ReturnStmtClass;
 diff --git a/include/clang/Parse/Parser.h b/include/clang/Parse/Parser.h
-index 8f5b20c..927d61a 100644
+index a606d78..fb31ae3 100644
 --- a/include/clang/Parse/Parser.h
 +++ b/include/clang/Parse/Parser.h
 @@ -810,14 +810,16 @@ private:
@@ -226,7 +226,7 @@ index 8f5b20c..927d61a 100644
    /// \brief The kind of extra semi diagnostic to emit.
    enum ExtraSemiKind {
 diff --git a/include/clang/Sema/Sema.h b/include/clang/Sema/Sema.h
-index 9cbe8e5..1933fbb 100644
+index 055d14f..5370b13 100644
 --- a/include/clang/Sema/Sema.h
 +++ b/include/clang/Sema/Sema.h
 @@ -3658,7 +3658,8 @@ public:
@@ -313,7 +313,7 @@ index 982fd45..26234d3 100644
                             SourceLocation RB)
      : Stmt(CompoundStmtClass), LBraceLoc(LB), RBraceLoc(RB) {
 diff --git a/lib/Parse/ParseStmt.cpp b/lib/Parse/ParseStmt.cpp
-index 3f25610..620bbeb 100644
+index 09ae9d7..1aa3185 100644
 --- a/lib/Parse/ParseStmt.cpp
 +++ b/lib/Parse/ParseStmt.cpp
 @@ -433,8 +433,9 @@ StmtResult Parser::ParseExprStatement() {
@@ -377,7 +377,7 @@ index 3f25610..620bbeb 100644
  
  StmtResult Parser::ParsePragmaLoopHint(StmtVector &Stmts,
 diff --git a/lib/Parse/Parser.cpp b/lib/Parse/Parser.cpp
-index 72d6537..3754277 100644
+index a6f966e..9ab2fdf 100644
 --- a/lib/Parse/Parser.cpp
 +++ b/lib/Parse/Parser.cpp
 @@ -107,8 +107,11 @@ static bool IsCommonTypo(tok::TokenKind ExpectedTok, const Token &Tok) {
@@ -420,7 +420,7 @@ index 72d6537..3754277 100644
  
  void Parser::ConsumeExtraSemi(ExtraSemiKind Kind, unsigned TST) {
 diff --git a/lib/Sema/SemaExprCXX.cpp b/lib/Sema/SemaExprCXX.cpp
-index cff9fbb..050afcb 100644
+index 89055ae..441c42a 100644
 --- a/lib/Sema/SemaExprCXX.cpp
 +++ b/lib/Sema/SemaExprCXX.cpp
 @@ -7523,7 +7523,8 @@ Sema::CorrectDelayedTyposInExpr(Expr *E, VarDecl *InitDecl,
@@ -442,10 +442,10 @@ index cff9fbb..050afcb 100644
  }
  
 diff --git a/lib/Sema/SemaStmt.cpp b/lib/Sema/SemaStmt.cpp
-index 4474d62..4409068 100644
+index 1ebc367..f42739f 100644
 --- a/lib/Sema/SemaStmt.cpp
 +++ b/lib/Sema/SemaStmt.cpp
-@@ -41,12 +41,15 @@
+@@ -42,12 +42,15 @@
  using namespace clang;
  using namespace sema;
  
@@ -463,7 +463,7 @@ index 4474d62..4409068 100644
    if (FE.isInvalid())
      return StmtError();
  
-@@ -1309,7 +1312,8 @@ StmtResult Sema::ActOnWhileStmt(SourceLocation WhileLoc, ConditionResult Cond,
+@@ -1310,7 +1313,8 @@ StmtResult Sema::ActOnWhileStmt(SourceLocation WhileLoc, ConditionResult Cond,
  StmtResult
  Sema::ActOnDoStmt(SourceLocation DoLoc, Stmt *Body,
                    SourceLocation WhileLoc, SourceLocation CondLParen,
@@ -473,7 +473,7 @@ index 4474d62..4409068 100644
    assert(Cond && "ActOnDoStmt(): missing expression");
  
    CheckBreakContinueBinding(Cond);
-@@ -1325,7 +1329,7 @@ Sema::ActOnDoStmt(SourceLocation DoLoc, Stmt *Body,
+@@ -1326,7 +1330,7 @@ Sema::ActOnDoStmt(SourceLocation DoLoc, Stmt *Body,
  
    DiagnoseUnusedExprResult(Body);
  
@@ -482,7 +482,7 @@ index 4474d62..4409068 100644
  }
  
  namespace {
-@@ -2820,7 +2824,8 @@ static void CheckJumpOutOfSEHFinally(Sema &S, SourceLocation Loc,
+@@ -2821,7 +2825,8 @@ static void CheckJumpOutOfSEHFinally(Sema &S, SourceLocation Loc,
  }
  
  StmtResult
@@ -492,7 +492,7 @@ index 4474d62..4409068 100644
    Scope *S = CurScope->getContinueParent();
    if (!S) {
      // C99 6.8.6.2p1: A break shall appear only in or as a loop body.
-@@ -2828,11 +2833,12 @@ Sema::ActOnContinueStmt(SourceLocation ContinueLoc, Scope *CurScope) {
+@@ -2829,11 +2834,12 @@ Sema::ActOnContinueStmt(SourceLocation ContinueLoc, Scope *CurScope) {
    }
    CheckJumpOutOfSEHFinally(*this, ContinueLoc, *S);
  
@@ -507,7 +507,7 @@ index 4474d62..4409068 100644
    Scope *S = CurScope->getBreakParent();
    if (!S) {
      // C99 6.8.6.3p1: A break shall appear only in or as a switch/loop body.
-@@ -2843,7 +2849,7 @@ Sema::ActOnBreakStmt(SourceLocation BreakLoc, Scope *CurScope) {
+@@ -2844,7 +2850,7 @@ Sema::ActOnBreakStmt(SourceLocation BreakLoc, Scope *CurScope) {
                       << "break");
    CheckJumpOutOfSEHFinally(*this, BreakLoc, *S);
  
@@ -516,7 +516,7 @@ index 4474d62..4409068 100644
  }
  
  /// \brief Determine whether the given expression is a candidate for
-@@ -3322,8 +3328,8 @@ bool Sema::DeduceFunctionTypeFromReturnExpr(FunctionDecl *FD,
+@@ -3329,8 +3335,8 @@ bool Sema::DeduceFunctionTypeFromReturnExpr(FunctionDecl *FD,
  
  StmtResult
  Sema::ActOnReturnStmt(SourceLocation ReturnLoc, Expr *RetValExp,
@@ -527,7 +527,7 @@ index 4474d62..4409068 100644
    if (R.isInvalid() || ExprEvalContexts.back().Context ==
                             ExpressionEvaluationContext::DiscardedStatement)
      return R;
-@@ -3340,7 +3346,8 @@ Sema::ActOnReturnStmt(SourceLocation ReturnLoc, Expr *RetValExp,
+@@ -3347,7 +3353,8 @@ Sema::ActOnReturnStmt(SourceLocation ReturnLoc, Expr *RetValExp,
    return R;
  }
  
@@ -537,7 +537,7 @@ index 4474d62..4409068 100644
    // Check for unexpanded parameter packs.
    if (RetValExp && DiagnoseUnexpandedParameterPack(RetValExp))
      return StmtError();
-@@ -3390,7 +3397,7 @@ StmtResult Sema::BuildReturnStmt(SourceLocation ReturnLoc, Expr *RetValExp) {
+@@ -3397,7 +3404,7 @@ StmtResult Sema::BuildReturnStmt(SourceLocation ReturnLoc, Expr *RetValExp) {
          return StmtError();
        RetValExp = ER.get();
      }
@@ -546,7 +546,7 @@ index 4474d62..4409068 100644
    }
  
    // FIXME: Add a flag to the ScopeInfo to indicate whether we're performing
-@@ -3485,7 +3492,7 @@ StmtResult Sema::BuildReturnStmt(SourceLocation ReturnLoc, Expr *RetValExp) {
+@@ -3492,7 +3499,7 @@ StmtResult Sema::BuildReturnStmt(SourceLocation ReturnLoc, Expr *RetValExp) {
        }
      }
  
@@ -555,7 +555,7 @@ index 4474d62..4409068 100644
    } else if (!RetValExp && !HasDependentReturnType) {
      FunctionDecl *FD = getCurFunctionDecl();
  
-@@ -3507,7 +3514,7 @@ StmtResult Sema::BuildReturnStmt(SourceLocation ReturnLoc, Expr *RetValExp) {
+@@ -3514,7 +3521,7 @@ StmtResult Sema::BuildReturnStmt(SourceLocation ReturnLoc, Expr *RetValExp) {
      else
        Diag(ReturnLoc, DiagID) << getCurMethodDecl()->getDeclName() << 1/*meth*/;
  
@@ -564,7 +564,7 @@ index 4474d62..4409068 100644
    } else {
      assert(RetValExp || HasDependentReturnType);
      const VarDecl *NRVOCandidate = nullptr;
-@@ -3560,7 +3567,7 @@ StmtResult Sema::BuildReturnStmt(SourceLocation ReturnLoc, Expr *RetValExp) {
+@@ -3567,7 +3574,7 @@ StmtResult Sema::BuildReturnStmt(SourceLocation ReturnLoc, Expr *RetValExp) {
          return StmtError();
        RetValExp = ER.get();
      }
